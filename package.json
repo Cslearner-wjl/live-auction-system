@@ -1,0 +1,20 @@
+{
+  "name": "live-auction-system",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.11.0",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @live-auction/server --filter @live-auction/admin --filter @live-auction/mobile dev",
+    "dev:server": "pnpm --filter @live-auction/server dev",
+    "dev:admin": "pnpm --filter @live-auction/admin dev",
+    "dev:mobile": "pnpm --filter @live-auction/mobile dev",
+    "build": "pnpm -r --if-present build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "pnpm -r --if-present lint",
+    "test": "pnpm -r --if-present test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3"
+  }
+}

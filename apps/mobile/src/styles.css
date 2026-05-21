@@ -1,0 +1,102 @@
+:root {
+  color: #fff;
+  background: #141414;
+  font-family:
+    Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.live-room {
+  position: relative;
+  min-height: 100vh;
+  max-width: 480px;
+  margin: 0 auto;
+  overflow: hidden;
+  background: linear-gradient(180deg, #30343c 0%, #111 100%);
+}
+
+.live-header {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px;
+}
+
+.room-label,
+.auction-mini-card p {
+  margin: 0 0 4px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 13px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.viewer-count {
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 13px;
+}
+
+.video-area {
+  display: grid;
+  min-height: calc(100vh - 116px);
+  padding: 18px;
+  place-items: center;
+}
+
+.video-copy {
+  display: grid;
+  gap: 8px;
+  text-align: center;
+}
+
+.video-copy strong {
+  font-size: 24px;
+}
+
+.video-copy span {
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.auction-mini-card {
+  position: absolute;
+  right: 16px;
+  bottom: 24px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(24, 24, 24, 0.88);
+  backdrop-filter: blur(12px);
+}
+
+.auction-mini-card strong {
+  font-size: 16px;
+}
+
+.auction-mini-card button {
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 6px;
+  padding: 10px 16px;
+  background: #f23d4f;
+  color: #fff;
+  font-weight: 700;
+}

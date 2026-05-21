@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+coverage/
+.turbo/
+*.tsbuildinfo
+
+# Vite
+.vite/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local databases and generated artifacts
+*.sqlite
+*.sqlite3
+uploads/
+tmp/
+
+# Local source materials, screenshots, and exported references
+picture/
+*.pdf
+直播竞拍全栈系统.md

@@ -1,0 +1,86 @@
+:root {
+  color: #172033;
+  background: #f5f7fb;
+  font-family:
+    Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.admin-shell {
+  min-height: 100vh;
+  padding: 32px;
+}
+
+.admin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: #536278;
+  font-size: 14px;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 0;
+  font-size: 28px;
+}
+
+.status-pill {
+  border: 1px solid #d7deea;
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: #fff;
+  color: #34445c;
+}
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.admin-grid article {
+  min-height: 160px;
+  border: 1px solid #dfe5ef;
+  border-radius: 8px;
+  padding: 20px;
+  background: #fff;
+}
+
+.admin-grid p {
+  color: #536278;
+  line-height: 1.7;
+}
+
+@media (max-width: 760px) {
+  .admin-shell {
+    padding: 20px;
+  }
+
+  .admin-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .admin-grid {
+    grid-template-columns: 1fr;
+  }
+}
