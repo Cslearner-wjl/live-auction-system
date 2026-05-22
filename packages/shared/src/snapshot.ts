@@ -12,6 +12,7 @@ export interface AuctionSnapshot {
   participantCount: number;
   endTime: string;
   serverTime: string;
+  serverSeq: number;
   leaderboard: AuctionLeaderboardEntry[];
 }
 

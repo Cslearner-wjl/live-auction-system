@@ -1,6 +1,6 @@
 # 架构设计
 
-本文档是 Day 1 架构初稿，描述直播竞拍系统的模块边界、数据流和关键一致性策略。后续实现时需要随代码更新。
+本文档描述直播竞拍系统的模块边界、数据流和关键一致性策略。当前仓库不代表所有模块已经实现；实现代码必须保持状态机、出价引擎和 WebSocket 契约集中一致。
 
 ## 1. 架构目标
 
@@ -8,7 +8,7 @@
 - 将竞拍状态机、出价校验、结算逻辑集中在服务端。
 - 使用 Redis 承接高频出价热状态，数据库保存权威业务记录。
 - WebSocket 按房间隔离广播，断线后通过 snapshot 恢复。
-- 所有金额使用整数分，所有公开事件和状态从 `packages/shared` 引用。
+- 所有金额使用整数分，所有公开事件、状态和错误码从 `packages/shared` 引用。
 
 ## 2. 模块划分
 
@@ -35,11 +35,12 @@ apps/server
   - BidService
   - OrderService
   - WebSocket Gateway
+  - AuctionScheduler
 
 packages/shared
   共享契约
   - 竞拍状态
-  - WebSocket 事件名
+  - WebSocket 事件名和事件元信息
   - API 错误码
   - Snapshot 类型
 ```
@@ -51,7 +52,7 @@ flowchart LR
   Admin["PC 管理后台"] -->|REST| Server["Server API"]
   Mobile["移动端 H5"] -->|REST| Server
   Mobile -->|WebSocket| Gateway["WebSocket Gateway"]
-  Server --> DB["MySQL / PostgreSQL"]
+  Server --> DB["MySQL"]
   Server --> Redis["Redis"]
   Gateway --> Redis
   Gateway --> Mobile
@@ -65,25 +66,49 @@ flowchart LR
 ### 4.1 创建与启动竞拍
 
 ```txt
-后台创建商品 -> 配置规则 -> 创建 AuctionSession -> 启动竞拍 -> 初始化 Redis 热状态 -> 广播 AUCTION_STARTED
+后台创建商品
+  -> 配置规则
+  -> 创建 AuctionSession(SCHEDULED)
+  -> 启动竞拍
+  -> 状态机流转到 RUNNING
+  -> 初始化 Redis 热状态
+  -> 安排结束 timer
+  -> 写 AuctionEvent
+  -> 广播 AUCTION_STARTED
 ```
 
 ### 4.2 用户出价
 
 ```txt
-移动端提交出价 -> BidService 校验 -> Redis Lua 原子更新 -> 写入 Bid -> 广播 BID_ACCEPTED / OUTBID / LEADING -> 必要时延时或结算
+移动端提交出价
+  -> DTO 和 demo 身份校验
+  -> Redis Lua 原子校验和更新热状态
+  -> 写 Bid
+  -> 写 AuctionEvent / outbox
+  -> 必要时延时或触发封顶结算
+  -> 广播 BID_ACCEPTED / OUTBID / LEADING / AUCTION_EXTENDED
 ```
 
 ### 4.3 竞拍结束
 
 ```txt
-到达 endTime 或命中 capPriceFen -> AuctionStateMachineService 结算 -> 有最高出价人生成 Order -> 广播 AUCTION_ENDED / ORDER_CREATED
+到达 endTime 或命中 capPriceFen
+  -> AuctionStateMachineService.finishAuction
+  -> DB transaction 条件更新状态
+  -> 有最高出价人则创建唯一订单
+  -> 写 AuctionEvent / AuditLog
+  -> 清理或设置 Redis 热 key TTL
+  -> 广播 AUCTION_ENDED / ORDER_CREATED
 ```
 
 ### 4.4 断线重连
 
 ```txt
-客户端重连 -> 加入 room:{roomId} 和 auction:{auctionId} -> 拉取 AUCTION_SNAPSHOT -> 用快照重建 UI -> 应用后续事件
+客户端重连
+  -> 加入 room:{roomId} 和 auction:{auctionId}
+  -> 拉取 AUCTION_SNAPSHOT
+  -> 用 snapshot.serverSeq 和 snapshot.serverTime 重建 UI
+  -> 应用后续 serverSeq 更大的实时事件
 ```
 
 ## 5. 状态机
@@ -117,10 +142,39 @@ stateDiagram-v2
 - 自动延时不使用独立持久状态，通过更新 `endTime` 和 `extendedCount` 表达。
 - 非法流转必须抛业务异常。
 - 订单创建必须由状态机结算流程触发，避免重复订单。
+- `finishAuction` 必须用 `where id = ? and status = RUNNING` 这类条件更新兜底，防止多实例或重复 timer 造成重复结算。
 
-## 6. 数据模型草案
+## 6. 定时结束与延时调度
 
-核心实体：
+### 6.1 MVP 单机方案
+
+个人开发阶段先采用单机内存调度，便于快速跑通闭环：
+
+- `startAuction` 成功后，按 `endTime` 设置 `setTimeout`。
+- 进程内维护 `auctionId -> timer` 映射。
+- 出价触发自动延时后，先清理旧 timer，再按新的 `endTime` 设置新 timer。
+- `cancelAuction` 或 `finishAuction` 后必须清理 timer。
+- 服务重启后，通过扫描 `RUNNING` 竞拍恢复 timer；已经过期的竞拍立即调用 `finishAuction`。
+
+单机方案的重复触发风险由数据库兜底：
+
+- `finishAuction` 在事务中读取当前状态。
+- 只允许 `RUNNING` 结束。
+- 更新状态时带 `status = RUNNING` 条件。
+- `Order(auctionId)` 唯一约束防止重复订单。
+
+### 6.2 进阶多实例方案
+
+并发和部署规模扩大后替换为：
+
+- Redis delayed queue 或 BullMQ 负责结束任务。
+- `finishAuction` 获取 distributed lock，例如 `lock:auction:{auctionId}:finish`。
+- 锁过期时间必须小于可接受恢复窗口，并配合 DB 条件更新。
+- 任务可重复投递，但结算必须幂等。
+
+## 7. 数据模型
+
+详细字段、索引和唯一约束见 `docs/database-schema.md`。核心实体：
 
 - `User`
 - `LiveRoom`
@@ -137,9 +191,10 @@ stateDiagram-v2
 - `Bid(auctionId, clientBidId)` 唯一。
 - `Order(auctionId)` 唯一。
 - 金额字段统一使用 `*Fen` 后缀。
-- `AuctionSession` 保留 `version` 字段，用于并发控制或对账。
+- `AuctionSession.version` 用于并发控制或对账。
+- `Bid.serverSeq` 和 `AuctionEvent.serverSeq` 用于 WebSocket 顺序控制。
 
-## 7. Redis 热状态
+## 8. Redis 热状态
 
 推荐 key：
 
@@ -159,24 +214,47 @@ auction:{auctionId}:client_bid:{clientBidId}
 - 校验出价金额和固定加价幅度。
 - 校验最高出价人不能重复出价。
 - 校验幂等 key。
+- 分配单场单调递增 `serverSeq`。
 - 更新当前价、最高出价人、出价次数和排行榜。
 - 判断是否触发延时或封顶成交。
 
-## 8. 一致性策略
+竞拍完成后，热 key 设置 TTL，保留足够时间给重连和对账使用。
 
-- Redis 保证高频出价路径原子性。
-- 数据库唯一约束兜底幂等和订单唯一性。
-- 竞拍事件写入 `auction_events`，用于追踪和补偿。
-- WebSocket 事件只作为实时通知，不作为唯一状态来源。
+## 9. 一致性策略
+
+一致性分三层：
+
+1. Redis Lua 保证实时出价路径原子性。
+2. DB unique 约束保证 `clientBidId` 和订单唯一。
+3. `auction_events` / outbox 记录待广播和待补偿事件。
+
+原则：
+
+- Redis 是热状态，数据库是权威业务记录。
+- WebSocket 只作为实时通知，不作为唯一状态来源。
 - 客户端以 snapshot 为准恢复状态。
+- Redis 成功但 DB 失败时不得直接广播成功事件；必须记录补偿或返回可重试错误。
 
-## 9. 后续演进
+详细流程见 `docs/consistency.md`。
 
-Day 2 将补充：
+## 10. WebSocket
 
-- Docker Compose。
-- ORM schema。
-- 数据库迁移。
-- Redis 连接。
-- seed 脚本。
-- `/health` 外的基础模块边界。
+事件只发送到相关房间：
+
+```txt
+room:{roomId}
+auction:{auctionId}
+user:{userId}
+```
+
+所有竞拍业务服务端事件必须包含：
+
+```txt
+eventId
+auctionId
+roomId
+serverSeq
+serverTime
+```
+
+客户端必须按 `serverSeq` 处理乱序、重复和跳号事件。完整契约见 `docs/websocket-events.md`。

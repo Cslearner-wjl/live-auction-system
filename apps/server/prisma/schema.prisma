@@ -1,0 +1,275 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum UserRole {
+  ADMIN  @map("admin")
+  BIDDER @map("bidder")
+
+  @@map("user_role")
+}
+
+enum LiveRoomStatus {
+  LIVE
+  CLOSED
+
+  @@map("live_room_status")
+}
+
+enum AuctionStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  ENDED_SOLD
+  ENDED_UNSOLD
+  CANCELLED
+
+  @@map("auction_status")
+}
+
+enum BidStatus {
+  ACCEPTED
+  REJECTED
+
+  @@map("bid_status")
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  CLOSED
+
+  @@map("order_status")
+}
+
+enum AuctionEventType {
+  AUCTION_STARTED
+  AUCTION_SNAPSHOT
+  BID_ACCEPTED
+  BID_REJECTED
+  OUTBID
+  LEADING
+  AUCTION_EXTENDED
+  AUCTION_ENDED
+  ORDER_CREATED
+  AUCTION_CANCELLED
+  PING
+  PONG
+
+  @@map("auction_event_type")
+}
+
+enum OutboxStatus {
+  PENDING
+  PUBLISHED
+  FAILED
+
+  @@map("outbox_status")
+}
+
+model User {
+  id              String           @id @default(cuid()) @db.VarChar(191)
+  displayName     String           @map("display_name") @db.VarChar(80)
+  maskedName      String           @map("masked_name") @db.VarChar(80)
+  role            UserRole         @default(BIDDER)
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  hostedRooms     LiveRoom[]       @relation("LiveRoomHost")
+  createdItems    AuctionItem[]    @relation("AuctionItemCreator")
+  bids            Bid[]
+  wonOrders       Order[]          @relation("OrderBuyer")
+  leadingAuctions AuctionSession[] @relation("AuctionHighestBidder")
+  auditLogs       AuditLog[]       @relation("AuditActor")
+
+  @@index([role])
+  @@map("users")
+}
+
+model LiveRoom {
+  id            String           @id @default(cuid()) @db.VarChar(191)
+  title         String           @db.VarChar(120)
+  hostUserId    String           @map("host_user_id") @db.VarChar(191)
+  status        LiveRoomStatus   @default(LIVE)
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+  host          User             @relation("LiveRoomHost", fields: [hostUserId], references: [id])
+  auctions      AuctionSession[]
+  auctionEvents AuctionEvent[]
+  auditLogs     AuditLog[]
+
+  @@index([hostUserId])
+  @@index([status])
+  @@map("live_rooms")
+}
+
+model AuctionItem {
+  id            String           @id @default(cuid()) @db.VarChar(191)
+  name          String           @db.VarChar(80)
+  imageUrl      String           @map("image_url") @db.VarChar(500)
+  description   String           @db.Text
+  sellingPoints Json             @default("[]") @map("selling_points")
+  createdById   String           @map("created_by_id") @db.VarChar(191)
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+  createdBy     User             @relation("AuctionItemCreator", fields: [createdById], references: [id])
+  auctions      AuctionSession[]
+  orders        Order[]
+
+  @@index([name])
+  @@index([createdById])
+  @@map("auction_items")
+}
+
+model AuctionRule {
+  id                         String          @id @default(cuid()) @db.VarChar(191)
+  startPriceFen              Int             @map("start_price_fen")
+  incrementFen               Int             @map("increment_fen")
+  durationSeconds            Int             @map("duration_seconds")
+  capPriceFen                Int             @map("cap_price_fen")
+  antiSnipingWindowSeconds   Int             @default(0) @map("anti_sniping_window_seconds")
+  extensionSeconds           Int             @default(0) @map("extension_seconds")
+  maxExtensionCount          Int             @default(0) @map("max_extension_count")
+  createdAt                  DateTime        @default(now()) @map("created_at")
+  updatedAt                  DateTime        @updatedAt @map("updated_at")
+  session                    AuctionSession?
+
+  @@map("auction_rules")
+}
+
+model AuctionSession {
+  id              String          @id @default(cuid()) @db.VarChar(191)
+  roomId          String          @map("room_id") @db.VarChar(191)
+  itemId          String          @map("item_id") @db.VarChar(191)
+  ruleId          String          @unique @map("rule_id") @db.VarChar(191)
+  status          AuctionStatus   @default(SCHEDULED)
+  startTime       DateTime?       @map("start_time")
+  endTime         DateTime?       @map("end_time")
+  startPriceFen   Int             @map("start_price_fen")
+  currentPriceFen Int             @map("current_price_fen")
+  incrementFen    Int             @map("increment_fen")
+  capPriceFen     Int             @map("cap_price_fen")
+  highestBidderId String?         @map("highest_bidder_id") @db.VarChar(191)
+  bidCount        Int             @default(0) @map("bid_count")
+  extendedCount   Int             @default(0) @map("extended_count")
+  serverSeq       Int             @default(0) @map("server_seq")
+  version         Int             @default(1)
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  room            LiveRoom        @relation(fields: [roomId], references: [id])
+  item            AuctionItem     @relation(fields: [itemId], references: [id])
+  rule            AuctionRule     @relation(fields: [ruleId], references: [id])
+  highestBidder   User?           @relation("AuctionHighestBidder", fields: [highestBidderId], references: [id])
+  bids            Bid[]
+  order           Order?
+  events          AuctionEvent[]
+  auditLogs       AuditLog[]
+
+  @@index([roomId])
+  @@index([itemId])
+  @@index([status])
+  @@index([startTime])
+  @@index([endTime])
+  @@index([highestBidderId])
+  @@index([roomId, status])
+  @@index([status, endTime])
+  @@index([itemId, status])
+  @@map("auction_sessions")
+}
+
+model Bid {
+  id           String         @id @default(cuid()) @db.VarChar(191)
+  auctionId    String         @map("auction_id") @db.VarChar(191)
+  userId       String         @map("user_id") @db.VarChar(191)
+  amountFen    Int            @map("amount_fen")
+  clientBidId  String         @map("client_bid_id") @db.VarChar(191)
+  serverSeq    Int            @map("server_seq")
+  status       BidStatus      @default(ACCEPTED)
+  rejectReason String?        @map("reject_reason") @db.VarChar(80)
+  createdAt    DateTime       @default(now()) @map("created_at")
+  auction      AuctionSession @relation(fields: [auctionId], references: [id])
+  user         User           @relation(fields: [userId], references: [id])
+
+  @@unique([auctionId, clientBidId])
+  @@index([auctionId])
+  @@index([userId])
+  @@index([amountFen])
+  @@index([status])
+  @@index([createdAt])
+  @@index([auctionId, serverSeq])
+  @@index([auctionId, amountFen])
+  @@map("bids")
+}
+
+model Order {
+  id        String         @id @default(cuid()) @db.VarChar(191)
+  auctionId String         @unique @map("auction_id") @db.VarChar(191)
+  itemId    String         @map("item_id") @db.VarChar(191)
+  buyerId   String         @map("buyer_id") @db.VarChar(191)
+  amountFen Int            @map("amount_fen")
+  status    OrderStatus    @default(PENDING_PAYMENT)
+  paidAt    DateTime?      @map("paid_at")
+  createdAt DateTime       @default(now()) @map("created_at")
+  updatedAt DateTime       @updatedAt @map("updated_at")
+  auction   AuctionSession @relation(fields: [auctionId], references: [id])
+  item      AuctionItem    @relation(fields: [itemId], references: [id])
+  buyer     User           @relation("OrderBuyer", fields: [buyerId], references: [id])
+
+  @@index([itemId])
+  @@index([buyerId])
+  @@index([status])
+  @@index([buyerId, status])
+  @@map("orders")
+}
+
+model AuctionEvent {
+  id           String           @id @default(cuid()) @db.VarChar(191)
+  auctionId    String           @map("auction_id") @db.VarChar(191)
+  roomId       String           @map("room_id") @db.VarChar(191)
+  type         AuctionEventType
+  serverSeq    Int              @map("server_seq")
+  payload      Json
+  outboxStatus OutboxStatus     @default(PENDING) @map("outbox_status")
+  publishedAt  DateTime?        @map("published_at")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  auction      AuctionSession   @relation(fields: [auctionId], references: [id])
+  room         LiveRoom         @relation(fields: [roomId], references: [id])
+  auditLogs    AuditLog[]
+
+  @@unique([auctionId, serverSeq])
+  @@index([auctionId])
+  @@index([roomId])
+  @@index([type])
+  @@index([outboxStatus])
+  @@index([createdAt])
+  @@index([outboxStatus, createdAt])
+  @@map("auction_events")
+}
+
+model AuditLog {
+  id            String          @id @default(cuid()) @db.VarChar(191)
+  actorUserId   String?         @map("actor_user_id") @db.VarChar(191)
+  action        String          @db.VarChar(80)
+  auctionId     String?         @map("auction_id") @db.VarChar(191)
+  roomId        String?         @map("room_id") @db.VarChar(191)
+  clientBidId   String?         @map("client_bid_id") @db.VarChar(191)
+  eventId       String?         @map("event_id") @db.VarChar(191)
+  metadata      Json            @default("{}")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  actor         User?           @relation("AuditActor", fields: [actorUserId], references: [id])
+  auction       AuctionSession? @relation(fields: [auctionId], references: [id])
+  room          LiveRoom?       @relation(fields: [roomId], references: [id])
+  event         AuctionEvent?   @relation(fields: [eventId], references: [id])
+
+  @@index([actorUserId])
+  @@index([action])
+  @@index([auctionId])
+  @@index([roomId])
+  @@index([clientBidId])
+  @@index([eventId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

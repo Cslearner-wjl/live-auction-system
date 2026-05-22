@@ -6,7 +6,7 @@
 商品上架 -> 规则配置 -> 直播间展示 -> 实时出价 -> 动态排名 -> 竞拍结束 -> 成交订单
 ```
 
-当前处于 Day 1：工程骨架和文档基线阶段。
+当前处于 Day 2：数据库模型、Docker 环境和基础后端连接阶段。
 
 ## 技术栈
 
@@ -15,7 +15,7 @@
 - PC 管理后台：React + TypeScript + Vite
 - 后端：Node.js + TypeScript + NestJS
 - 共享契约：`packages/shared`
-- 数据库：MySQL，后续使用 Prisma
+- 数据库：MySQL + Prisma
 - 缓存与并发：Redis
 - 实时通信：WebSocket / Socket.IO，后续按实现确定
 - 部署：Docker Compose
@@ -37,6 +37,9 @@ docs/
   tech-stack-constraints.md
   development-process.md
   ai-codex-log.md
+  database-schema.md
+  consistency.md
+  error-codes.md
 ```
 
 ## 本地启动
@@ -45,6 +48,28 @@ docs/
 
 ```bash
 pnpm install
+```
+
+启动 MySQL 和 Redis：
+
+```bash
+docker compose up -d mysql redis
+```
+
+本地 MySQL 使用 8.0 系列并启用 `mysql_native_password`，用于规避 MySQL 8.4 默认认证插件与当前 Prisma schema engine 的兼容问题。
+如果本机已经安装 MySQL，项目 Docker MySQL 暴露在 `127.0.0.1:3307`，容器内仍使用默认 `3306`。
+
+生成 Prisma Client：
+
+```bash
+pnpm --filter @live-auction/server prisma:generate
+```
+
+执行数据库迁移和 seed：
+
+```bash
+pnpm --filter @live-auction/server prisma:migrate -- --name init
+pnpm --filter @live-auction/server prisma:seed
 ```
 
 启动服务端：
@@ -72,6 +97,12 @@ pnpm typecheck
 pnpm build
 ```
 
+服务端健康检查：
+
+```bash
+curl http://localhost:3000/health
+```
+
 ## 环境变量
 
 复制 `.env.example` 到 `.env` 后填写本地配置。真实密钥只允许放在 `.env`，不得提交。
@@ -84,8 +115,16 @@ pnpm build
 - 创建 `packages/shared`，沉淀竞拍状态、WebSocket 事件和错误码。
 - 补齐架构、API、WebSocket 事件和 Day 1 TODO 文档。
 
+## Day 2 完成内容
+
+- 新增 `docker-compose.yml`，提供本地 MySQL 和 Redis。
+- 新增 Prisma schema，覆盖用户、直播间、商品、规则、竞拍、出价、订单、事件和审计日志。
+- 新增 Prisma seed，创建 `admin_1`、`user_1`、`user_2`、`room_1`、`item_1`、`auction_1` 演示数据。
+- 后端接入 Prisma 和 Redis 服务边界。
+- `/health` 返回服务、数据库和 Redis 状态。
+
 ## 当前限制
 
-- 尚未实现数据库模型、Docker Compose、竞拍业务接口和 WebSocket 网关。
+- 尚未实现竞拍业务接口和 WebSocket 网关。
 - 当前页面是骨架占位，用于验证工程结构。
-- 出价、状态机、订单结算和并发一致性将在 Day 2 之后逐步实现。
+- 出价、状态机、订单结算和并发一致性将在后续 Day 3-Day 6 逐步实现。

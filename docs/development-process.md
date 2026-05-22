@@ -73,6 +73,7 @@
 
 - `docker-compose.yml`。
 - ORM schema。
+- `docs/database-schema.md` 与 Prisma schema 对齐。
 - 基础 `/health` API。
 - seed 脚本生成直播间、主播和测试用户。
 
@@ -198,9 +199,20 @@ POST /auctions/:id/bids
 
 - Redis Lua 脚本原子校验和更新热状态。
 - 成功后写入 `bids` 表。
-- 成功后广播 `BID_ACCEPTED`。
+- 写入 `auction_events` / outbox 后再广播 `BID_ACCEPTED`。
 - 失败返回明确错误码和原因。
 - 达到封顶价触发状态机结算。
+
+建议拆分：
+
+| 子任务 | 目标 | 验收 |
+| --- | --- | --- |
+| 5.1 出价规则校验 | 先实现清晰的规则校验函数 | 低价、步长、封顶、最高出价人重复出价均有单元测试 |
+| 5.2 `clientBidId` 幂等 | 用数据库唯一约束和服务层逻辑兜底 | 相同 `auctionId + clientBidId` 不产生重复出价 |
+| 5.3 Redis Lua 原子更新 | 将当前价、最高出价人、出价次数、`serverSeq` 放进 Lua 原子路径 | 30 并发不价格倒退 |
+| 5.4 DB 落库和事件 outbox | accepted 后写 Bid、更新 AuctionSession、写 AuctionEvent | DB 失败时不广播成功事件 |
+| 5.5 封顶价触发结算 | 达到封顶价后调用状态机结算 | 只生成一个订单 |
+| 5.6 并发测试 | 覆盖 30 和 100 并发出价 | 最高价唯一，订单不重复，Redis 与 DB 可对账 |
 
 交付物：
 
@@ -208,6 +220,7 @@ POST /auctions/:id/bids
 - Redis Lua 脚本。
 - 幂等处理。
 - 并发测试。
+- `docs/consistency.md` 根据实现更新。
 
 验收：
 
@@ -261,6 +274,7 @@ PONG
 - 心跳。
 - snapshot API。
 - `docs/websocket-events.md`。
+- 事件 `serverSeq` 和乱序处理测试。
 
 验收：
 
@@ -528,8 +542,12 @@ AI 功能：
 README.md
 docs/architecture.md
 docs/api.md
+docs/database-schema.md
+docs/error-codes.md
+docs/consistency.md
 docs/websocket-events.md
 docs/performance-report.md
+docs/manual-test.md
 docs/ai-codex-log.md
 docs/demo-script.md
 ```

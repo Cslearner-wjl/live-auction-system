@@ -16,3 +16,20 @@ export enum AuctionWebSocketEvent {
 export const auctionRoomName = (auctionId: string) => `auction:${auctionId}`;
 export const liveRoomName = (roomId: string) => `room:${roomId}`;
 export const userRoomName = (userId: string) => `user:${userId}`;
+
+export interface ServerEventMeta {
+  eventId: string;
+  auctionId: string;
+  roomId: string;
+  serverSeq: number;
+  serverTime: string;
+}
+
+export interface SequencedAuctionEventPayload extends ServerEventMeta {
+  type: AuctionWebSocketEvent;
+}
+
+export interface PongPayload {
+  eventId: string;
+  serverTime: string;
+}
