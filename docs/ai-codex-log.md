@@ -59,3 +59,15 @@
 | human-reviewed decisions | 不删除已有 `live-auction_mysql-data` 旧数据卷，改用 `mysql80-data` 新卷；本地 Docker MySQL 使用 `127.0.0.1:3307`，避免连到 Windows 本机 `mysqld:3306`；`mysql_native_password` 仅作为本地开发兼容方案 |
 | tests run | `docker compose up -d mysql redis`、`pnpm install --force`、`pnpm --filter @live-auction/server prisma:generate`、`pnpm --filter @live-auction/server prisma:migrate -- --name init`、`pnpm --filter @live-auction/server prisma:seed`、`pnpm --filter @live-auction/server typecheck`、启动服务端并请求 `/health` 返回 `status: ok`、`pnpm typecheck`、`pnpm test` |
 | known issues | `pnpm test` 当前没有包级测试输出；本机已有 MySQL 占用 3306，后续本项目应继续使用 3307 或先停止本机 MySQL；MySQL 8.0 的 `default_authentication_plugin` 已 deprecated，仅用于本地开发兼容当前 Prisma engine |
+
+## 2026-05-23
+
+| 字段 | 内容 |
+| --- | --- |
+| task | Day 3 开发：主播端商品发布与竞拍规则配置 API |
+| prompt summary | 用户要求完成 Day 3 任务并更新文档 |
+| files changed | `apps/server/src/common/*`、`apps/server/src/admin/*`、`apps/server/src/auction/*`、`apps/server/src/app.module.ts`、`apps/server/package.json`、`README.md`、`docs/api.md`、`docs/manual-test.md`、`docs/ai-codex-log.md` |
+| AI-generated parts | 管理端 demo 鉴权、统一 API 异常、分页解析、商品 CRUD、竞拍创建/列表/详情/规则修改/启动/取消、规则校验单元测试、状态流转单元测试、Day 3 文档更新 |
+| human-reviewed decisions | Day 3 不引入 class-validator 或 Vitest，使用显式校验函数和现有 `tsx` 运行 Node 内置测试；启动和取消先进入 `AuctionStateMachineService`，后续 Day 4 扩展结束和结算；本轮不实现 Redis 热状态、WebSocket 广播和订单结算 |
+| tests run | `pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/server test`、`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build`、启动服务端并请求 `/health`、`GET /admin/items`、非法规则 `POST /admin/auctions` 返回 `VALIDATION_FAILED` |
+| known issues | Day 3 启动竞拍只更新数据库状态和时间，不初始化 Redis 热状态、不安排结束 timer、不广播 WebSocket 事件；取消竞拍只返回接口响应，取消事件广播待 WebSocket 网关实现；订单查询、AI 卖点接口和 E2E 测试脚本尚未实现 |

@@ -1,6 +1,6 @@
 # API 契约
 
-本文档定义直播竞拍系统的目标 REST API 契约。当前仓库不代表所有接口已经实现；实现代码必须向本文档收敛，接口变更必须同步更新本文档和 `packages/shared`。
+本文档定义直播竞拍系统的 REST API 契约。当前 Day 3 已实现管理端商品与竞拍规则配置接口；用户端出价、订单支付、WebSocket 相关接口仍按目标契约记录，后续实现代码必须向本文档收敛。
 
 ## 1. 通用约定
 
@@ -195,6 +195,21 @@ curl http://localhost:3000/health
 X-Demo-User-Id: admin_1
 X-Demo-Role: admin
 ```
+
+Day 3 已实现：
+
+- `POST /admin/items`
+- `GET /admin/items`
+- `GET /admin/items/:itemId`
+- `PATCH /admin/items/:itemId`
+- `POST /admin/auctions`
+- `GET /admin/auctions`
+- `GET /admin/auctions/:auctionId`
+- `PATCH /admin/auctions/:auctionId/rules`
+- `POST /admin/auctions/:auctionId/start`
+- `POST /admin/auctions/:auctionId/cancel`
+
+Day 3 尚未实现订单和 AI 卖点接口；订单会在结算流程落地后接入。
 
 ### POST /admin/items
 
@@ -452,7 +467,21 @@ curl "http://localhost:3000/admin/auctions?status=RUNNING&page=1&pageSize=20" \
   "extendedCount": 1,
   "highestBidderId": "user_1",
   "bidCount": 14,
-  "version": 18
+  "version": 18,
+  "item": {
+    "id": "item_1",
+    "name": "翡翠手镯",
+    "imageUrl": "https://example.com/item.png"
+  },
+  "rule": {
+    "startPriceFen": 0,
+    "incrementFen": 1000,
+    "durationSeconds": 300,
+    "capPriceFen": 100000,
+    "antiSnipingWindowSeconds": 10,
+    "extensionSeconds": 15,
+    "maxExtensionCount": 3
+  }
 }
 ```
 
@@ -492,6 +521,8 @@ curl -X PATCH http://localhost:3000/admin/auctions/auction_1/rules \
 
 200：返回启动后的 Auction DTO。
 
+Day 3 只做 DB 状态更新和 `startTime` / `endTime` 写入；Redis 热状态初始化、结束 timer、事件 outbox 和 WebSocket 广播在 Day 4 以后实现。
+
 错误：`401 UNAUTHORIZED`、`403 FORBIDDEN`、`404 AUCTION_NOT_FOUND`、`409 INVALID_AUCTION_TRANSITION`。
 
 curl：
@@ -524,6 +555,8 @@ Request DTO：
 ```
 
 错误：`400 VALIDATION_FAILED`、`401 UNAUTHORIZED`、`403 FORBIDDEN`、`404 AUCTION_NOT_FOUND`、`409 INVALID_AUCTION_TRANSITION`。
+
+Day 3 只做 DB 状态取消和稳定响应；取消事件广播在 WebSocket 网关落地后实现。
 
 curl：
 

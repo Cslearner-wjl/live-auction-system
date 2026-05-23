@@ -4,6 +4,11 @@
 
 | 场景 | 前置条件 | 操作 | 预期结果 | 结果 |
 | --- | --- | --- | --- | --- |
+| 后台创建商品 | 已启动服务端，数据库已 seed `admin_1` | 调用 `POST /admin/items`，带 `X-Demo-Role: admin` | 返回 `201` 和商品 DTO，`sellingPoints` 被规范化保存 | 待测 |
+| 后台创建 0 元起拍竞拍 | 已有 `room_1` 和商品 | 调用 `POST /admin/auctions`，`startPriceFen: 0`、`incrementFen > 0`、`capPriceFen > 0` | 返回 `SCHEDULED` 竞拍，`currentPriceFen` 为 `0` | 单元测试已覆盖核心规则，接口待测 |
+| 后台拒绝非法规则 | 已启动服务端 | 创建竞拍时传 `incrementFen: 0` 或 `capPriceFen <= startPriceFen` | 返回 `400 VALIDATION_FAILED`，错误字段稳定 | 单元测试已覆盖核心规则，接口待测 |
+| 开拍后禁止改规则 | 已创建并启动竞拍 | 调用 `PATCH /admin/auctions/:id/rules` | 返回 `409 RULE_CANNOT_BE_CHANGED_AFTER_START` | 单元测试已覆盖核心规则，接口待测 |
+| 后台取消竞拍 | 竞拍为 `SCHEDULED` 或 `RUNNING` | 调用 `POST /admin/auctions/:id/cancel` 并填写原因 | 状态变为 `CANCELLED`，返回取消原因和时间 | 接口已实现，待测 |
 | 无人出价到期流拍 | 已创建并启动竞拍，时长较短 | 不提交任何出价，等待到期 | 状态变为 `ENDED_UNSOLD`，不生成订单，用户端收到结束事件 | 待测 |
 | 单人出价成交 | 竞拍运行中 | 用户 A 提交有效出价，等待到期 | 状态变为 `ENDED_SOLD`，生成一个订单，买家为用户 A | 待测 |
 | 多人连续出价 | 竞拍运行中，至少 2 个用户窗口 | 用户 A、B 交替按固定幅度出价 | 当前价单调递增，最高出价人唯一，被超越用户收到提醒 | 待测 |
