@@ -101,6 +101,13 @@ flowchart LR
   -> 广播 AUCTION_ENDED / ORDER_CREATED
 ```
 
+Day 4 当前实现状态：
+
+- `AuctionStateMachineService.finishAuction` 已实现 DB 事务内结算。
+- 有 `highestBidderId` 时流转 `ENDED_SOLD` 并创建唯一订单；无最高出价人时流转 `ENDED_UNSOLD`。
+- `AuctionSchedulerService` 已实现单机 timer 和服务启动后的 `RUNNING` 竞拍恢复扫描。
+- Redis 热状态、事件 outbox、AuditLog 和 WebSocket 广播仍未落地，后续实现必须继续向上述目标数据流收敛。
+
 ### 4.4 断线重连
 
 ```txt
@@ -148,7 +155,7 @@ stateDiagram-v2
 
 ### 6.1 MVP 单机方案
 
-个人开发阶段先采用单机内存调度，便于快速跑通闭环：
+个人开发阶段先采用单机内存调度，便于快速跑通闭环。Day 4 已落地该方案的启动注册、取消清理和启动恢复扫描：
 
 - `startAuction` 成功后，按 `endTime` 设置 `setTimeout`。
 - 进程内维护 `auctionId -> timer` 映射。

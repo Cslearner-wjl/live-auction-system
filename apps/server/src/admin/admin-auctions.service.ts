@@ -12,6 +12,7 @@ import {
   assertAuctionRuleEditable,
   parsePatchAuctionRule
 } from "../auction/auction-rule.validation";
+import { AuctionSchedulerService } from "../auction/auction-scheduler.service";
 import { AuctionStateMachineService } from "../auction/auction-state-machine.service";
 import { notFound } from "../common/api-error";
 import {
@@ -92,7 +93,9 @@ export class AdminAuctionsService {
     @Inject(PrismaService)
     private readonly prisma: PrismaService,
     @Inject(AuctionStateMachineService)
-    private readonly stateMachine: AuctionStateMachineService
+    private readonly stateMachine: AuctionStateMachineService,
+    @Inject(AuctionSchedulerService)
+    private readonly scheduler: AuctionSchedulerService
   ) {}
 
   async createAuction(payload: CreateAuctionPayload): Promise<AuctionDto> {
@@ -202,7 +205,8 @@ export class AdminAuctionsService {
   }
 
   async startAuction(auctionId: string): Promise<AuctionDto> {
-    await this.stateMachine.startAuction(auctionId);
+    const auction = await this.stateMachine.startAuction(auctionId);
+    this.scheduler.scheduleEndTimer(auction);
     return this.getAuction(auctionId);
   }
 
@@ -212,6 +216,7 @@ export class AdminAuctionsService {
   ): Promise<CancelAuctionDto> {
     const reason = parseCancelAuction(payload);
     await this.stateMachine.cancelAuction(auctionId);
+    this.scheduler.clearEndTimer(auctionId);
 
     return {
       auctionId,

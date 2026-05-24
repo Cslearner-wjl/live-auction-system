@@ -32,5 +32,6 @@
 ## 4. 风险说明
 
 - MVP 单机 timer 适合个人演示，多实例部署需要切换到 Redis delayed queue 或 BullMQ。
+- Day 4 已实现到期结算和订单创建，但实时出价、WebSocket 事件和移动端结果联动仍需后续开发；演示时不得把这些描述为已完成。
 - 真实支付、真实直播推流和完整认证不在 MVP 范围内。
 - AI 卖点生成是加分项，缺少 API Key 时必须 fallback 到 mock。

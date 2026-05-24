@@ -1,6 +1,6 @@
 # API 契约
 
-本文档定义直播竞拍系统的 REST API 契约。当前 Day 3 已实现管理端商品与竞拍规则配置接口；用户端出价、订单支付、WebSocket 相关接口仍按目标契约记录，后续实现代码必须向本文档收敛。
+本文档定义直播竞拍系统的 REST API 契约。当前 Day 4 已实现管理端商品、竞拍规则配置、启动/取消、定时结束结算和管理端订单查询；用户端出价、订单支付、WebSocket 相关接口仍按目标契约记录，后续实现代码必须向本文档收敛。
 
 ## 1. 通用约定
 
@@ -165,6 +165,27 @@ CANCELLED
 | `bidCount` | integer | 是 | 有效出价次数 |
 | `version` | integer | 是 | 状态版本 |
 
+#### OrderStatus
+
+```txt
+PENDING_PAYMENT
+PAID
+CLOSED
+```
+
+#### Order DTO
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `id` | string | 是 | 订单 ID |
+| `auctionId` | string | 是 | 竞拍 ID |
+| `itemId` | string | 是 | 商品 ID |
+| `buyerId` | string | 是 | 买家用户 ID |
+| `amountFen` | integer | 是 | 成交金额，单位分 |
+| `status` | OrderStatus | 是 | 订单状态 |
+| `createdAt` | string | 是 | ISO 时间 |
+| `updatedAt` | string | 是 | ISO 时间 |
+
 ## 2. Health
 
 ### GET /health
@@ -196,7 +217,7 @@ X-Demo-User-Id: admin_1
 X-Demo-Role: admin
 ```
 
-Day 3 已实现：
+Day 4 已实现：
 
 - `POST /admin/items`
 - `GET /admin/items`
@@ -208,8 +229,10 @@ Day 3 已实现：
 - `PATCH /admin/auctions/:auctionId/rules`
 - `POST /admin/auctions/:auctionId/start`
 - `POST /admin/auctions/:auctionId/cancel`
+- `GET /admin/orders`
+- `GET /admin/orders/:orderId`
 
-Day 3 尚未实现订单和 AI 卖点接口；订单会在结算流程落地后接入。
+AI 卖点接口尚未实现；订单由 Day 4 的结算流程生成，并可通过管理端订单接口查询。
 
 ### POST /admin/items
 
@@ -521,7 +544,7 @@ curl -X PATCH http://localhost:3000/admin/auctions/auction_1/rules \
 
 200：返回启动后的 Auction DTO。
 
-Day 3 只做 DB 状态更新和 `startTime` / `endTime` 写入；Redis 热状态初始化、结束 timer、事件 outbox 和 WebSocket 广播在 Day 4 以后实现。
+Day 4 在 DB 状态更新和 `startTime` / `endTime` 写入后，会注册单机结束 timer。服务重启时扫描 `RUNNING` 竞拍恢复 timer；已过期竞拍会立即进入状态机结算。Redis 热状态初始化、事件 outbox 和 WebSocket 广播仍在 Day 5 以后实现。
 
 错误：`401 UNAUTHORIZED`、`403 FORBIDDEN`、`404 AUCTION_NOT_FOUND`、`409 INVALID_AUCTION_TRANSITION`。
 
@@ -556,7 +579,7 @@ Request DTO：
 
 错误：`400 VALIDATION_FAILED`、`401 UNAUTHORIZED`、`403 FORBIDDEN`、`404 AUCTION_NOT_FOUND`、`409 INVALID_AUCTION_TRANSITION`。
 
-Day 3 只做 DB 状态取消和稳定响应；取消事件广播在 WebSocket 网关落地后实现。
+取消成功后会清理本进程内的结束 timer；取消事件广播在 WebSocket 网关落地后实现。
 
 curl：
 
@@ -571,6 +594,8 @@ curl -X POST http://localhost:3000/admin/auctions/auction_1/cancel \
 ### GET /admin/orders
 
 查询订单列表。
+
+Day 4 已实现。成交订单由 `AuctionStateMachineService.finishAuction` 在事务内创建，`Order(auctionId)` 唯一约束保证同一竞拍不会重复生成订单。
 
 Query：
 

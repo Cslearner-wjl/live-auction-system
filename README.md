@@ -6,7 +6,7 @@
 商品上架 -> 规则配置 -> 直播间展示 -> 实时出价 -> 动态排名 -> 竞拍结束 -> 成交订单
 ```
 
-当前处于 Day 3：主播端商品发布与竞拍规则配置 API 已落地。
+当前处于 Day 4：竞拍启动、单机定时结束、成交/流拍结算和管理端订单查询已落地。
 
 ## 技术栈
 
@@ -133,8 +133,19 @@ curl http://localhost:3000/health
 - 新增最小 `AuctionStateMachineService`，集中处理 Day 3 的启动和取消状态流转。
 - 新增服务端单元测试，覆盖 Day 3 核心规则和状态流转。
 
+## Day 4 完成内容
+
+- 扩展 `AuctionStateMachineService.finishAuction`，支持到期成交和流拍结算。
+- 有最高出价人时创建 `PENDING_PAYMENT` 订单；无人出价时流拍且不生成订单。
+- 订单创建在状态机事务内完成，并由 `Order(auctionId)` 唯一约束防止重复订单。
+- 新增 `AuctionSchedulerService`，启动竞拍后注册单机结束 timer，服务启动时恢复 `RUNNING` 竞拍的 timer。
+- 取消竞拍时清理本进程结束 timer。
+- 新增管理端订单查询 API：`GET /admin/orders`、`GET /admin/orders/:orderId`。
+- 新增状态机单元测试，覆盖成交、流拍、未到结束时间拒绝、重复结束不重复建单。
+
 ## 当前限制
 
-- 尚未实现用户端出价接口、竞拍自动结束、成交订单生成和 WebSocket 网关。
+- 尚未实现用户端出价接口、Redis 原子并发出价和 WebSocket 网关。
 - 当前页面是骨架占位，用于验证工程结构。
-- 出价、订单结算、Redis 原子并发和断线重连快照将在后续 Day 4-Day 6 逐步实现。
+- 当前结束调度是 MVP 单机 timer，多实例部署需要切换到 Redis delayed queue 或 BullMQ。
+- 出价、Redis 原子并发和断线重连快照将在后续 Day 5-Day 6 逐步实现。

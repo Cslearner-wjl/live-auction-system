@@ -71,3 +71,15 @@
 | human-reviewed decisions | Day 3 不引入 class-validator 或 Vitest，使用显式校验函数和现有 `tsx` 运行 Node 内置测试；启动和取消先进入 `AuctionStateMachineService`，后续 Day 4 扩展结束和结算；本轮不实现 Redis 热状态、WebSocket 广播和订单结算 |
 | tests run | `pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/server test`、`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build`、启动服务端并请求 `/health`、`GET /admin/items`、非法规则 `POST /admin/auctions` 返回 `VALIDATION_FAILED` |
 | known issues | Day 3 启动竞拍只更新数据库状态和时间，不初始化 Redis 热状态、不安排结束 timer、不广播 WebSocket 事件；取消竞拍只返回接口响应，取消事件广播待 WebSocket 网关实现；订单查询、AI 卖点接口和 E2E 测试脚本尚未实现 |
+
+## 2026-05-24
+
+| 字段 | 内容 |
+| --- | --- |
+| task | Day 4 开发：竞拍状态机结束结算、单机定时结束机制和管理端订单查询 |
+| prompt summary | 用户要求完成 Day 4 工作并更新文档 |
+| files changed | `apps/server/src/auction/*`、`apps/server/src/admin/*`、`packages/shared/src/*`、`README.md`、`docs/api.md`、`docs/architecture.md`、`docs/manual-test.md`、`docs/demo-script.md`、`docs/ai-codex-log.md` |
+| AI-generated parts | `finishAuction` 成交/流拍事务结算、`AuctionSchedulerService` 单机 timer 和启动恢复扫描、管理端订单查询接口、订单状态共享枚举、状态机单元测试、Day 4 文档更新 |
+| human-reviewed decisions | Day 4 只落地 DB 权威状态和单机 timer，不提前实现 Redis 热状态、出价 API、事件 outbox 或 WebSocket 广播；订单创建放在状态机事务内，并继续依赖 `Order(auctionId)` 唯一约束防重复；管理端订单查询作为 Day 4 结算结果的验证入口补齐 |
+| tests run | `pnpm --filter @live-auction/server test`、`pnpm --filter @live-auction/shared build`、`pnpm --filter @live-auction/server typecheck`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm lint` |
+| known issues | 用户端出价 API、Redis Lua 原子出价、WebSocket 房间广播、事件 outbox、AuditLog 写入和移动端结果联动仍未实现；结束调度为单机内存 timer，多实例部署需要 Redis delayed queue 或 BullMQ；真实 timer 恢复流程尚未做端到端测试 |
