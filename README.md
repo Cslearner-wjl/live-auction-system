@@ -6,7 +6,7 @@
 商品上架 -> 规则配置 -> 直播间展示 -> 实时出价 -> 动态排名 -> 竞拍结束 -> 成交订单
 ```
 
-当前处于 Day 4：竞拍启动、单机定时结束、成交/流拍结算和管理端订单查询已落地。
+当前处于 Day 7：服务端出价 API、Redis Lua 原子出价、幂等、封顶成交、防狙击延时、WebSocket 房间隔离、断线重连 snapshot、outbox 广播发布和主播端管理后台联调已落地；移动端真实页面联动和正式压测仍在后续范围。
 
 ## 技术栈
 
@@ -17,7 +17,7 @@
 - 共享契约：`packages/shared`
 - 数据库：MySQL + Prisma
 - 缓存与并发：Redis
-- 实时通信：WebSocket / Socket.IO，后续按实现确定
+- 实时通信：Socket.IO / WebSocket
 - 部署：Docker Compose
 
 ## 项目结构
@@ -30,9 +30,14 @@ apps/
 packages/
   shared/         # 共享状态、事件名、错误码、DTO 类型
 docs/
+  README.md
+  progress.md
   architecture.md
   api.md
   websocket-events.md
+  manual-test.md
+  performance-report.md
+  demo-script.md
   requirements-analysis.md
   tech-stack-constraints.md
   development-process.md
@@ -114,7 +119,7 @@ curl http://localhost:3000/health
 - 创建 `apps/server` NestJS 骨架和 `/health` 健康检查。
 - 创建 `apps/admin` 和 `apps/mobile` Vite React 骨架。
 - 创建 `packages/shared`，沉淀竞拍状态、WebSocket 事件和错误码。
-- 补齐架构、API、WebSocket 事件和 Day 1 TODO 文档。
+- 补齐架构、API、WebSocket 事件和进度追踪文档。
 
 ## Day 2 完成内容
 
@@ -143,9 +148,41 @@ curl http://localhost:3000/health
 - 新增管理端订单查询 API：`GET /admin/orders`、`GET /admin/orders/:orderId`。
 - 新增状态机单元测试，覆盖成交、流拍、未到结束时间拒绝、重复结束不重复建单。
 
+## Day 5 完成内容
+
+- 新增用户端出价 API：`POST /auctions/:auctionId/bids`，使用 `X-Demo-Role: bidder` demo 身份。
+- 新增 Redis Lua 原子出价路径，维护当前价、最高出价人、结束时间、出价次数、排行榜和 `clientBidId` 热幂等键。
+- 出价服务落库 `Bid`，更新 `AuctionSession` 快照字段，并写入 `AuctionEvent(BID_ACCEPTED, outboxStatus=PENDING)`。
+- 支持固定加价校验、最高出价人不可重复出价、封顶价校验、重复 `clientBidId` 幂等兜底。
+- 达到 `capPriceFen` 后调用状态机立即成交，并继续依赖 `Order(auctionId)` 唯一约束防重复订单。
+- 结束前防狙击窗口内有效出价会延长 `endTime` 并重排本进程结束 timer。
+- 新增服务端单元测试，覆盖 30 和 100 并发出价、重复 `clientBidId`、并发封顶、延时和核心拒绝规则。
+
+## Day 6 完成内容
+
+- 新增 `RealtimeModule`，提供 Socket.IO gateway、实时 REST 查询和 outbox 发布器。
+- WebSocket 连接使用 demo 身份加入 `user:{userId}`，支持 `joinRoom`、`joinAuction`、`leaveAuction`、`requestSnapshot`、`placeBid` 和 `PING`。
+- 新增 `GET /rooms/:roomId/auctions`、`GET /auctions/:auctionId`、`GET /auctions/:auctionId/snapshot`，snapshot 包含 `roomId`、`serverTime`、`serverSeq`、排行榜和当前用户排名。
+- 状态机在启动、取消、成交/流拍和订单创建时写入 `AuctionEvent` outbox。
+- `AuctionEventPublisherService` 轮询 `PENDING` 事件，按 `room:{roomId}`、`auction:{auctionId}`、`user:{userId}` 定向广播，并在成功后标记 `PUBLISHED`，失败时标记 `FAILED` 并写审计日志。
+- `BID_ACCEPTED` outbox 会拆分广播 `BID_ACCEPTED`、`LEADING`、`OUTBID`，触发延时时同时广播 `AUCTION_EXTENDED`。
+- 新增服务端单元测试，覆盖房间加入、重连 snapshot、outbox 房间隔离、私有提醒和发布失败留痕。
+
+## Day 7 完成内容
+
+- 管理端从 Day 1 骨架升级为可用后台工作台。
+- 竞拍列表接入 `GET /admin/auctions`，支持状态筛选、刷新、启动竞拍和取消异常竞拍。
+- 竞拍列表展示商品图、商品名、卖点标签、起拍价、固定加价、封顶价、当前价 / 成交金额、出价次数、竞拍状态和剩余时间。
+- 订单列表接入 `GET /admin/orders`，展示订单 ID、竞拍 ID、商品、买家、成交金额、订单状态和创建时间。
+- 管理端订单 API 追加商品名、商品图、买家脱敏名和竞拍状态字段，便于后台列表展示。
+- 补充取消竞拍写入 `AUCTION_CANCELLED` outbox 的单元测试，延续 Day 6 发布器房间隔离覆盖。
+- 文档、AI 协作日志和本地学习文档同步到 Day 7。
+
 ## 当前限制
 
-- 尚未实现用户端出价接口、Redis 原子并发出价和 WebSocket 网关。
-- 当前页面是骨架占位，用于验证工程结构。
+- 移动端仍是骨架占位，尚未接入真实 REST / Socket.IO 事件。
+- 管理端已接入真实 API，但本轮本机 Docker Desktop 未运行，真实 MySQL/Redis 环境下的浏览器联调待补测。
 - 当前结束调度是 MVP 单机 timer，多实例部署需要切换到 Redis delayed queue 或 BullMQ。
-- 出价、Redis 原子并发和断线重连快照将在后续 Day 5-Day 6 逐步实现。
+- Redis accepted 但 DB 写失败时暂按 MVP 补偿策略处理：不广播成功，记录审计日志，后续需要实现 Redis/DB 对账任务。
+- 封顶成交会让数据库 `serverSeq` 继续推进到结束和订单事件；Redis 热状态中的 seq/status 暂不反向同步，后续对账任务需要覆盖。
+- 真实性能压测脚本和报告仍需补充；当前只有服务端单元级并发测试。

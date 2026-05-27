@@ -2,6 +2,7 @@ import type { AuctionStatus } from "./auction-status";
 
 export interface AuctionSnapshot {
   auctionId: string;
+  roomId: string;
   status: AuctionStatus;
   currentPriceFen: number;
   nextBidAmountFen: number;
@@ -10,7 +11,7 @@ export interface AuctionSnapshot {
   myRank: number | null;
   bidCount: number;
   participantCount: number;
-  endTime: string;
+  endTime: string | null;
   serverTime: string;
   serverSeq: number;
   leaderboard: AuctionLeaderboardEntry[];

@@ -83,3 +83,75 @@
 | human-reviewed decisions | Day 4 只落地 DB 权威状态和单机 timer，不提前实现 Redis 热状态、出价 API、事件 outbox 或 WebSocket 广播；订单创建放在状态机事务内，并继续依赖 `Order(auctionId)` 唯一约束防重复；管理端订单查询作为 Day 4 结算结果的验证入口补齐 |
 | tests run | `pnpm --filter @live-auction/server test`、`pnpm --filter @live-auction/shared build`、`pnpm --filter @live-auction/server typecheck`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm lint` |
 | known issues | 用户端出价 API、Redis Lua 原子出价、WebSocket 房间广播、事件 outbox、AuditLog 写入和移动端结果联动仍未实现；结束调度为单机内存 timer，多实例部署需要 Redis delayed queue 或 BullMQ；真实 timer 恢复流程尚未做端到端测试 |
+
+## 2026-05-24
+
+| 字段 | 内容 |
+| --- | --- |
+| task | Day 4 后文档审视和整理 |
+| prompt summary | 用户要求审视 `docs` 目录，删除不需要内容并补充优化，当前 Day 4 已完成 |
+| files changed | `README.md`、`docs/README.md`、`docs/progress.md`、`docs/api.md`、`docs/manual-test.md`、`docs/performance-report.md`、`docs/demo-script.md`、`docs/ai-codex-log.md`，删除 `docs/day1-todo.md` |
+| AI-generated parts | 文档索引、进度追踪、Day 4 可演示范围、压测准入条件、手工测试阶段边界、Health 响应契约修正 |
+| human-reviewed decisions | 早期 `day1-todo.md` 已过期，改由 `progress.md` 承接进度；所有未实现的出价、Redis、WebSocket 和移动端联动能力继续保留为目标契约，但不得标记为已完成 |
+| tests run | `pnpm lint`、`pnpm typecheck`、`pnpm test`、`rg` 文档过期关键词检查、`rg` 明文密钥模式检查 |
+| known issues | 本轮不修改业务代码；Day 5 仍需实现出价引擎、并发测试和 Redis/DB 一致性校验 |
+
+## 2026-05-24
+
+| 字段 | 内容 |
+| --- | --- |
+| task | 基于技术栈学习方案 PDF 生成项目工程经验学习文档 |
+| prompt summary | 用户提供 `ChatGPT-技术栈学习方案.pdf`，要求精简形成学习文档，把项目问题整理为可复盘、可迁移、可写简历、可面试讲清楚的工程经验 |
+| files changed | `docs/learning/engineering-experience.md`、`docs/README.md`、`docs/ai-codex-log.md` |
+| AI-generated parts | PDF 建议提炼、Day4 工程经验卡片、简历素材库、面试题库、后续补充模板 |
+| human-reviewed decisions | 不创建十几个分散学习笔记，先用一份主文档承接；只把 Day4 已真实完成的状态机、规则校验、结算、timer、环境和文档治理写成可讲经验；Redis Lua、WebSocket、移动端联动标为后续素材 |
+| tests run | `pnpm lint`、`pnpm typecheck`、`pnpm test`、`rg` 未实现能力误标检查、`rg` 明文密钥模式检查 |
+| known issues | 本轮不修改业务代码；学习文档里的 Day5/Day6 内容仍需等实现和验证后才能转成简历完成项 |
+
+## 2026-05-24
+
+| 字段 | 内容 |
+| --- | --- |
+| task | 设置本地学习文档提交规则和每日收尾要求 |
+| prompt summary | 用户要求学习文档不要推送到 GitHub，并规定完成每日工作后都要落实该学习文档 |
+| files changed | `.gitignore`、`AGENTS.md`、`docs/README.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | 本地学习文档忽略规则、每日更新要求、公开文档索引调整、AI 日志记录 |
+| human-reviewed decisions | `docs/learning/` 作为本地沉淀目录被 Git 忽略；公开文档索引不再直接链接该目录，避免 GitHub 上出现缺失文件入口；每日完成任务后仍必须更新本地学习文档 |
+| tests run | `git check-ignore -v docs/learning/engineering-experience.md`、`git status --short --ignored docs/learning`、`pnpm lint` |
+| known issues | 学习文档不会随 GitHub 同步，换机器或重建仓库时需要手动迁移本地 `docs/learning/` 内容 |
+
+## 2026-05-25
+
+| 字段 | 内容 |
+| --- | --- |
+| task | Day 5 开发：服务端出价引擎、Redis Lua 原子热状态、幂等、延时和封顶成交 |
+| prompt summary | 用户要求完成 Day 5 部分任务并更新相应文档 |
+| files changed | `apps/server/src/bid/*`、`apps/server/src/cache/redis.service.ts`、`apps/server/src/common/demo-auth.guard.ts`、`apps/server/src/app.module.ts`、`packages/shared/src/error-codes.ts`、`README.md`、`docs/README.md`、`docs/progress.md`、`docs/api.md`、`docs/architecture.md`、`docs/consistency.md`、`docs/error-codes.md`、`docs/manual-test.md`、`docs/performance-report.md`、`docs/demo-script.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | `BidModule`、`BidController`、`BidService`、Redis Lua 出价脚本、出价 DTO 校验、bidder demo guard、出价服务单元/并发测试、Day 5 文档和学习沉淀更新 |
+| human-reviewed decisions | 出价热路径采用 Redis Lua 原子校验和更新，数据库仍作为权威记录；成功出价先落库 Bid、AuctionSession 和 AuctionEvent outbox，不在 Day 5 直接广播；封顶成交继续通过状态机创建订单；Redis accepted 但 DB 失败时按 MVP 补偿策略返回 `BID_PERSISTENCE_FAILED` 并写审计日志 |
+| tests run | `pnpm --filter @live-auction/shared build`、`pnpm --filter @live-auction/server test`、`pnpm --filter @live-auction/server typecheck`、`pnpm typecheck`、`pnpm test`、`pnpm lint`、`pnpm build`、检查 root `test:e2e` 脚本不存在 |
+| known issues | Day 5 尚未实现 WebSocket 网关、outbox 发布 worker、Redis/DB 自动对账、移动端真实联动和真实 HTTP 压测；当前 30/100 并发为服务端单元级一致性测试，不代表生产性能数据 |
+
+## 2026-05-26
+
+| 字段 | 内容 |
+| --- | --- |
+| task | Day 6 开发：Socket.IO 房间隔离、断线重连 snapshot 和 outbox 广播发布 |
+| prompt summary | 用户要求完成 Day 6 任务、更新相应文档，并记录遇到的问题 |
+| files changed | `apps/server/package.json`、`apps/server/src/app.module.ts`、`apps/server/src/realtime/*`、`apps/server/src/auction/auction-state-machine.service.ts`、`apps/server/src/auction/auction-state-machine.service.test.ts`、`apps/server/src/admin/admin-auctions.service.ts`、`apps/server/src/bid/*`、`packages/shared/src/*`、`README.md`、`docs/README.md`、`docs/progress.md`、`docs/api.md`、`docs/architecture.md`、`docs/consistency.md`、`docs/websocket-events.md`、`docs/manual-test.md`、`docs/performance-report.md`、`docs/demo-script.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | `RealtimeModule`、`AuctionRealtimeGateway`、`AuctionSnapshotService`、`AuctionEventPublisherService`、实时 REST controller、Socket.IO 房间事件处理、outbox 广播映射、状态机 outbox 事件写入、Day 6 测试和文档更新 |
+| human-reviewed decisions | 采用 Nest 官方 Socket.IO 适配器而不是自写 WebSocket 协议；成功广播必须来自已落库 `AuctionEvent`；`BID_ACCEPTED` 一个 outbox 事件派生 `BID_ACCEPTED`、`LEADING`、`OUTBID` 和可选 `AUCTION_EXTENDED`；HTTP 出价失败不额外写拒绝事件，Socket.IO 出价失败由 gateway 定向发送 `BID_REJECTED`；移动端页面接入留到 Day 8/Day 9 |
+| tests run | `pnpm --filter @live-auction/shared build`、`pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/server test` |
+| known issues | 当前 outbox 发布器为单进程轮询，多实例部署可能重复发布，需要后续引入 claim 状态或分布式锁；封顶成交后数据库 `serverSeq` 会推进到结束和订单事件，Redis 热状态暂不反向同步，需要 Redis/DB 对账任务覆盖；尚未做真实 Socket.IO 多浏览器联调、移动端页面接入和正式压测 |
+
+## 2026-05-27
+
+| 字段 | 内容 |
+| --- | --- |
+| task | Day 7 开发：主播端管理后台页面联调、管理端展示字段补齐和提交推送 |
+| prompt summary | 用户要求继续实现 Day 7 任务、更新文档，审查无误后提交至 GitHub |
+| files changed | `apps/admin/src/App.tsx`、`apps/admin/src/styles.css`、`apps/server/src/admin/admin-auctions.service.ts`、`apps/server/src/admin/admin-orders.service.ts`、`apps/server/src/auction/auction-state-machine.service.test.ts`、`README.md`、`docs/README.md`、`docs/progress.md`、`docs/api.md`、`docs/manual-test.md`、`docs/demo-script.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | 管理端竞拍/订单工作台、状态筛选、启动/取消操作、订单列表、后台展示字段 DTO、取消 outbox 单元测试、Day 7 文档和学习沉淀 |
+| human-reviewed decisions | 不引入 Ant Design 等大型 UI 依赖，沿用轻量 React/CSS；页面只消费 API 返回状态，不复制竞拍状态机逻辑；订单列表用后端补充的商品和买家字段展示；真实 API 浏览器联调因 Docker Desktop 未运行暂记为待补测 |
+| tests run | `pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/admin typecheck`、`pnpm --filter @live-auction/server test`、浏览器打开 `http://localhost:5173/` 检查管理端页面标题、竞拍列表、订单 tab 和控制台错误 |
+| known issues | 本机 Docker Desktop 未运行，无法启动 MySQL/Redis 做真实接口浏览器联调；管理端创建商品/竞拍表单仍在 Day 10 范围；移动端真实页面联动和正式压测仍未完成 |

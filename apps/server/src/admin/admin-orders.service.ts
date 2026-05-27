@@ -1,5 +1,11 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { OrderStatus as PrismaOrderStatus, type Order } from "@prisma/client";
+import {
+  OrderStatus as PrismaOrderStatus,
+  type AuctionItem,
+  type AuctionSession,
+  type Order,
+  type User
+} from "@prisma/client";
 import { AuctionErrorCode, OrderStatus, orderStatuses } from "@live-auction/shared";
 import { notFound, validationFailed } from "../common/api-error";
 import {
@@ -19,6 +25,10 @@ export interface OrderDto {
   status: OrderStatus;
   createdAt: string;
   updatedAt: string;
+  itemName?: string;
+  itemImageUrl?: string;
+  buyerMaskedName?: string;
+  auctionStatus?: string;
 }
 
 export interface OrderListDto {
@@ -41,6 +51,19 @@ export class AdminOrdersService {
     const [orders, total] = await this.prisma.$transaction([
       this.prisma.order.findMany({
         where,
+        include: {
+          item: true,
+          buyer: {
+            select: {
+              maskedName: true
+            }
+          },
+          auction: {
+            select: {
+              status: true
+            }
+          }
+        },
         orderBy: { createdAt: "desc" },
         skip: pagination.skip,
         take: pagination.take
@@ -56,7 +79,20 @@ export class AdminOrdersService {
 
   async getOrder(orderId: string): Promise<OrderDto> {
     const order = await this.prisma.order.findUnique({
-      where: { id: orderId }
+      where: { id: orderId },
+      include: {
+        item: true,
+        buyer: {
+          select: {
+            maskedName: true
+          }
+        },
+        auction: {
+          select: {
+            status: true
+          }
+        }
+      }
     });
 
     if (!order) {
@@ -81,7 +117,13 @@ export function parseOrderStatusFilter(value: unknown): OrderStatus | undefined 
   return value as OrderStatus;
 }
 
-function toOrderDto(order: Order): OrderDto {
+type OrderWithRelations = Order & {
+  item?: AuctionItem;
+  buyer?: Pick<User, "maskedName">;
+  auction?: Pick<AuctionSession, "status">;
+};
+
+function toOrderDto(order: OrderWithRelations): OrderDto {
   return {
     id: order.id,
     auctionId: order.auctionId,
@@ -90,6 +132,10 @@ function toOrderDto(order: Order): OrderDto {
     amountFen: order.amountFen,
     status: order.status as OrderStatus,
     createdAt: order.createdAt.toISOString(),
-    updatedAt: order.updatedAt.toISOString()
+    updatedAt: order.updatedAt.toISOString(),
+    itemName: order.item?.name,
+    itemImageUrl: order.item?.imageUrl,
+    buyerMaskedName: order.buyer?.maskedName,
+    auctionStatus: order.auction?.status
   };
 }

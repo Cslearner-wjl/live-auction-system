@@ -1,6 +1,6 @@
 # API 契约
 
-本文档定义直播竞拍系统的 REST API 契约。当前 Day 4 已实现管理端商品、竞拍规则配置、启动/取消、定时结束结算和管理端订单查询；用户端出价、订单支付、WebSocket 相关接口仍按目标契约记录，后续实现代码必须向本文档收敛。
+本文档定义直播竞拍系统的 REST API 契约。当前 Day 7 已实现管理端商品、竞拍规则配置、启动/取消、定时结束结算、管理端订单查询、管理端页面联调、用户端出价、用户端竞拍查询、snapshot 和服务端 WebSocket/outbox 广播；订单支付和 AI 卖点接口仍按目标契约记录，后续实现代码必须向本文档收敛。
 
 ## 1. 通用约定
 
@@ -134,6 +134,8 @@ CANCELLED
 | `createdAt` | string | 响应必填 | ISO 时间 |
 | `updatedAt` | string | 响应必填 | ISO 时间 |
 
+管理端竞拍列表会额外返回 `itemSellingPoints`，竞拍详情的 `item` 摘要也会返回 `sellingPoints`，用于后台标签展示。
+
 #### Auction Rule DTO
 
 | 字段 | 类型 | 必填 | 规则 |
@@ -185,6 +187,10 @@ CLOSED
 | `status` | OrderStatus | 是 | 订单状态 |
 | `createdAt` | string | 是 | ISO 时间 |
 | `updatedAt` | string | 是 | ISO 时间 |
+| `itemName` | string | 否 | 管理端列表展示用商品名 |
+| `itemImageUrl` | string | 否 | 管理端列表展示用商品图 |
+| `buyerMaskedName` | string | 否 | 管理端列表展示用买家脱敏名 |
+| `auctionStatus` | AuctionStatus | 否 | 管理端列表展示用竞拍状态 |
 
 ## 2. Health
 
@@ -198,9 +204,21 @@ CLOSED
 {
   "status": "ok",
   "service": "live-auction-server",
-  "timestamp": "2026-05-21T00:00:00.000Z"
+  "timestamp": "2026-05-21T00:00:00.000Z",
+  "checks": {
+    "database": {
+      "status": "ok",
+      "latencyMs": 12
+    },
+    "redis": {
+      "status": "ok",
+      "latencyMs": 4
+    }
+  }
 }
 ```
+
+当数据库或 Redis 检查失败时，`status` 返回 `degraded`，对应依赖的 `checks.*.status` 为 `error`，并带脱敏后的 `message`。健康检查不得暴露连接串、密码或完整底层堆栈。
 
 curl：
 
@@ -217,7 +235,7 @@ X-Demo-User-Id: admin_1
 X-Demo-Role: admin
 ```
 
-Day 4 已实现：
+Day 7 已实现：
 
 - `POST /admin/items`
 - `GET /admin/items`
@@ -231,8 +249,12 @@ Day 4 已实现：
 - `POST /admin/auctions/:auctionId/cancel`
 - `GET /admin/orders`
 - `GET /admin/orders/:orderId`
+- `GET /rooms/:roomId/auctions`
+- `GET /auctions/:auctionId`
+- `GET /auctions/:auctionId/snapshot`
+- `POST /auctions/:auctionId/bids`
 
-AI 卖点接口尚未实现；订单由 Day 4 的结算流程生成，并可通过管理端订单接口查询。
+AI 卖点接口尚未实现；订单由状态机结算流程生成，并可通过管理端订单接口查询。
 
 ### POST /admin/items
 
@@ -441,6 +463,7 @@ Query：
       "itemId": "item_1",
       "itemName": "翡翠手镯",
       "itemImageUrl": "https://example.com/item.png",
+      "itemSellingPoints": ["支持鉴定", "包邮"],
       "status": "RUNNING",
       "startPriceFen": 0,
       "incrementFen": 1000,
@@ -494,7 +517,8 @@ curl "http://localhost:3000/admin/auctions?status=RUNNING&page=1&pageSize=20" \
   "item": {
     "id": "item_1",
     "name": "翡翠手镯",
-    "imageUrl": "https://example.com/item.png"
+    "imageUrl": "https://example.com/item.png",
+    "sellingPoints": ["支持鉴定", "包邮"]
   },
   "rule": {
     "startPriceFen": 0,
@@ -544,7 +568,7 @@ curl -X PATCH http://localhost:3000/admin/auctions/auction_1/rules \
 
 200：返回启动后的 Auction DTO。
 
-Day 4 在 DB 状态更新和 `startTime` / `endTime` 写入后，会注册单机结束 timer。服务重启时扫描 `RUNNING` 竞拍恢复 timer；已过期竞拍会立即进入状态机结算。Redis 热状态初始化、事件 outbox 和 WebSocket 广播仍在 Day 5 以后实现。
+启动竞拍在 DB 状态更新和 `startTime` / `endTime` 写入后，会注册单机结束 timer，并写入 `AUCTION_STARTED` outbox。服务重启时扫描 `RUNNING` 竞拍恢复 timer；已过期竞拍会立即进入状态机结算。Redis 热状态由出价服务在首次出价时按 DB 快照惰性初始化，WebSocket 广播由 outbox 发布器异步完成。
 
 错误：`401 UNAUTHORIZED`、`403 FORBIDDEN`、`404 AUCTION_NOT_FOUND`、`409 INVALID_AUCTION_TRANSITION`。
 
@@ -579,7 +603,7 @@ Request DTO：
 
 错误：`400 VALIDATION_FAILED`、`401 UNAUTHORIZED`、`403 FORBIDDEN`、`404 AUCTION_NOT_FOUND`、`409 INVALID_AUCTION_TRANSITION`。
 
-取消成功后会清理本进程内的结束 timer；取消事件广播在 WebSocket 网关落地后实现。
+取消成功后会清理本进程内的结束 timer，并写入 `AUCTION_CANCELLED` outbox，由发布器广播到 `room:{roomId}` 和 `auction:{auctionId}`。
 
 curl：
 
@@ -595,7 +619,7 @@ curl -X POST http://localhost:3000/admin/auctions/auction_1/cancel \
 
 查询订单列表。
 
-Day 4 已实现。成交订单由 `AuctionStateMachineService.finishAuction` 在事务内创建，`Order(auctionId)` 唯一约束保证同一竞拍不会重复生成订单。
+已实现。成交订单由 `AuctionStateMachineService.finishAuction` / `settleSoldAuction` 在事务内创建，`Order(auctionId)` 唯一约束保证同一竞拍不会重复生成订单。
 
 Query：
 
@@ -617,6 +641,10 @@ Query：
       "buyerId": "user_1",
       "amountFen": 100000,
       "status": "PENDING_PAYMENT",
+      "itemName": "翡翠手镯",
+      "itemImageUrl": "https://example.com/item.png",
+      "buyerMaskedName": "张**",
+      "auctionStatus": "ENDED_SOLD",
       "createdAt": "2026-06-01T10:00:00.000Z",
       "updatedAt": "2026-06-01T10:00:00.000Z"
     }
@@ -705,6 +733,8 @@ X-Demo-Role: bidder
 
 查询直播间当前可见竞拍。
 
+已实现，用于移动端首次进入直播间或重连后恢复可见竞拍列表。
+
 200：
 
 ```json
@@ -743,6 +773,8 @@ curl http://localhost:3000/rooms/room_1/auctions \
 
 查询竞拍基础信息。
 
+已实现，返回商品信息、规则摘要、当前价、结束时间和 `serverSeq`。
+
 200：
 
 ```json
@@ -780,11 +812,14 @@ curl http://localhost:3000/auctions/auction_1 \
 
 查询竞拍快照，用于首次加载和重连恢复。客户端必须以快照为准重建 UI。
 
+已实现。`endTime` 在尚未启动的竞拍中可能为 `null`；运行中竞拍必须返回 ISO 时间。
+
 200：
 
 ```json
 {
   "auctionId": "auction_1",
+  "roomId": "room_1",
   "status": "RUNNING",
   "currentPriceFen": 85000,
   "nextBidAmountFen": 90000,
@@ -812,7 +847,7 @@ curl http://localhost:3000/auctions/auction_1/snapshot \
 
 ### POST /auctions/:auctionId/bids
 
-提交出价。
+提交出价。已实现服务端出价核心：Redis Lua 原子校验和热状态更新，成功后落库 `Bid`、更新 `AuctionSession`、写入 `AuctionEvent(BID_ACCEPTED, outboxStatus=PENDING)`；WebSocket 成功事件由 outbox 发布器异步广播。
 
 Request DTO：
 
@@ -829,15 +864,29 @@ Request DTO：
   "auctionId": "auction_1",
   "bidId": "bid_1",
   "amountFen": 90000,
+  "previousPriceFen": 85000,
+  "previousHighestBidderId": "user_2",
   "currentPriceFen": 90000,
   "highestBidderId": "user_1",
+  "bidCount": 14,
   "serverSeq": 18,
   "extended": false,
-  "ended": false
+  "endTime": "2026-06-01T10:00:00.000Z",
+  "reachedCapPrice": false,
+  "status": "RUNNING",
+  "idempotent": false
 }
 ```
 
-错误：`400 VALIDATION_FAILED`、`401 UNAUTHORIZED`、`403 FORBIDDEN`、`404 AUCTION_NOT_FOUND`、`409 AUCTION_NOT_RUNNING`、`409 AUCTION_ALREADY_ENDED`、`409 AUCTION_CANCELLED`、`409 BID_AMOUNT_TOO_LOW`、`409 BID_INCREMENT_INVALID`、`409 BID_EXCEEDS_CAP_PRICE`、`409 BIDDER_ALREADY_LEADING`、`409 DUPLICATE_CLIENT_BID`。
+封顶价成交时：
+
+- `reachedCapPrice` 为 `true`。
+- `status` 返回 `ENDED_SOLD`。
+- `orderId` 返回状态机生成的订单 ID。
+
+重复提交已落库的 `auctionId + clientBidId` 时返回原 Bid 结果，并标记 `idempotent: true`；如果并发重复请求命中 Redis 热幂等键但 DB 尚未提交，可能返回 `409 DUPLICATE_CLIENT_BID`，客户端应拉取 snapshot 或稍后重试同一个 `clientBidId`。
+
+错误：`400 VALIDATION_FAILED`、`401 UNAUTHORIZED`、`403 FORBIDDEN`、`404 AUCTION_NOT_FOUND`、`409 AUCTION_NOT_RUNNING`、`409 AUCTION_ALREADY_ENDED`、`409 AUCTION_CANCELLED`、`409 BID_AMOUNT_TOO_LOW`、`409 BID_INCREMENT_INVALID`、`409 BID_EXCEEDS_CAP_PRICE`、`409 BIDDER_ALREADY_LEADING`、`409 DUPLICATE_CLIENT_BID`、`503 BID_PERSISTENCE_FAILED`。
 
 curl：
 

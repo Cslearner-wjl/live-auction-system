@@ -2,6 +2,12 @@ import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
 import { createClient } from "redis";
 
 type RedisClient = ReturnType<typeof createClient>;
+export type RedisEvalResult = string | number | RedisEvalResult[] | null;
+
+export interface RedisEvalOptions {
+  keys: string[];
+  arguments: string[];
+}
 
 @Injectable()
 export class RedisService implements OnModuleDestroy {
@@ -12,6 +18,11 @@ export class RedisService implements OnModuleDestroy {
   async ping(): Promise<string> {
     const client = await this.getClient();
     return client.ping();
+  }
+
+  async eval(script: string, options: RedisEvalOptions): Promise<RedisEvalResult> {
+    const client = await this.getClient();
+    return client.eval(script, options) as Promise<RedisEvalResult>;
   }
 
   async onModuleDestroy(): Promise<void> {

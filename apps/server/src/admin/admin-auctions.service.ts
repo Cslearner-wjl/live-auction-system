@@ -49,6 +49,7 @@ export interface AuctionItemSummaryDto {
   id: string;
   name: string;
   imageUrl: string;
+  sellingPoints: string[];
 }
 
 export interface AuctionDto {
@@ -73,6 +74,7 @@ export interface AuctionDto {
 export interface AuctionListItemDto extends Omit<AuctionDto, "item" | "rule"> {
   itemName: string;
   itemImageUrl: string;
+  itemSellingPoints: string[];
 }
 
 export interface AuctionListDto {
@@ -215,7 +217,7 @@ export class AdminAuctionsService {
     payload: CancelAuctionPayload
   ): Promise<CancelAuctionDto> {
     const reason = parseCancelAuction(payload);
-    await this.stateMachine.cancelAuction(auctionId);
+    await this.stateMachine.cancelAuction(auctionId, { reason });
     this.scheduler.clearEndTimer(auctionId);
 
     return {
@@ -285,7 +287,8 @@ export function toAuctionDto(auction: AuctionWithRelations): AuctionDto {
       ? {
           id: auction.item.id,
           name: auction.item.name,
-          imageUrl: auction.item.imageUrl
+          imageUrl: auction.item.imageUrl,
+          sellingPoints: toStringArray(auction.item.sellingPoints)
         }
       : undefined,
     rule: auction.rule ? toRuleDto(auction.rule) : undefined
@@ -299,6 +302,7 @@ function toAuctionListItemDto(auction: AuctionSession & { item: AuctionItem }): 
     itemId: auction.itemId,
     itemName: auction.item.name,
     itemImageUrl: auction.item.imageUrl,
+    itemSellingPoints: toStringArray(auction.item.sellingPoints),
     status: auction.status as AuctionStatus,
     startPriceFen: auction.startPriceFen,
     currentPriceFen: auction.currentPriceFen,
@@ -327,4 +331,10 @@ function toRuleValues(rule: AuctionRule): AuctionRuleValues {
     extensionSeconds: rule.extensionSeconds,
     maxExtensionCount: rule.maxExtensionCount
   };
+}
+
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
 }

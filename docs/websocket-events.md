@@ -1,6 +1,6 @@
 # WebSocket 事件契约
 
-本文档定义直播竞拍系统的目标 WebSocket 契约。事件名必须与 `packages/shared/src/websocket-events.ts` 保持一致。当前仓库不代表 Gateway 已经实现。
+本文档定义直播竞拍系统的 WebSocket 契约。事件名必须与 `packages/shared/src/websocket-events.ts` 保持一致。Day 6 服务端已基于 Socket.IO 实现 gateway、房间加入、snapshot 请求、心跳、Socket.IO 出价和 outbox 广播；移动端页面尚未接入真实事件。
 
 ## 1. 房间约定
 
@@ -30,6 +30,21 @@ connect
 ```
 
 客户端不能依赖历史事件恢复状态。首次加载和重连后必须拉取 snapshot。
+
+Day 6 demo 身份：
+
+Socket.IO 客户端优先通过 `handshake.auth` 传身份：
+
+```json
+{
+  "auth": {
+    "userId": "user_1",
+    "role": "bidder"
+  }
+}
+```
+
+服务端也兼容 `x-demo-user-id` 和 `x-demo-role` header。连接成功后自动加入 `user:{userId}`；身份缺失或角色非法会断开连接。
 
 ## 3. 事件顺序与版本
 
@@ -100,6 +115,20 @@ connect
 
 服务端可以返回 `AUCTION_SNAPSHOT`，也可以要求客户端调用 `GET /auctions/:auctionId/snapshot`。无论哪种方式，快照都必须包含 `serverSeq`。
 
+### placeBid
+
+Socket.IO 出价。HTTP 出价接口仍是主流程；该事件用于移动端后续直接在 WebSocket 通道提交出价。
+
+```json
+{
+  "auctionId": "auction_1",
+  "amountFen": 90000,
+  "clientBidId": "uuid-from-client"
+}
+```
+
+成功时 ack 返回 `ok: true` 和出价结果；`BID_ACCEPTED`、`LEADING`、`OUTBID` 等仍由 outbox 发布器异步广播。失败时 ack 返回 `ok: false`，并向 `user:{userId}` 发送 `BID_REJECTED`。
+
 ### PING
 
 ```json
@@ -152,6 +181,8 @@ connect
   "leaderboard": []
 }
 ```
+
+`SCHEDULED` 等尚未产生 `endTime` 的状态下，`endTime` 可以为 `null`。
 
 ### BID_ACCEPTED
 
@@ -320,12 +351,16 @@ connect
 
 ## 6. 测试要求
 
-WebSocket 实现必须覆盖：
+Day 6 已通过服务端单元测试覆盖：
 
 - 用户可加入直播间和竞拍房间。
 - `BID_ACCEPTED` 只到达同一竞拍房间用户。
 - `OUTBID` 和 `LEADING` 只到达对应用户房间。
-- 不同直播间和不同竞拍之间事件不串房。
 - 重连后可以拉取包含 `serverSeq` 的最新 snapshot。
+- outbox 发布成功标记 `PUBLISHED`，发布失败标记 `FAILED` 并记录审计日志。
+
+仍需移动端接入和端到端测试覆盖：
+
+- 不同直播间和不同竞拍之间事件不串房。
 - 乱序旧事件不会覆盖新快照。
 - 发现 `serverSeq` 跳号时会重新拉取 snapshot。

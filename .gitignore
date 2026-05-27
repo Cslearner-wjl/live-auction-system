@@ -40,3 +40,6 @@ tmp/
 picture/
 *.pdf
 直播竞拍全栈系统.md
+
+# Local learning notes, not for GitHub
+docs/learning/

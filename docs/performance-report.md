@@ -1,26 +1,31 @@
 # 性能测试报告
 
-本文档只记录可复现的真实性能数据。当前尚未完成压测，以下为报告模板，不编造结果。
+本文档只记录可复现的真实性能数据。当前尚未完成外部压测；Day 5-Day 7 已补充服务端单元级一致性、房间隔离和管理端类型检查，不能等同于真实性能数据。
+
+## 0. 当前状态
+
+当前基线为 Day 7，已实现用户端出价 API、Redis Lua 原子出价、Socket.IO 房间隔离、重连 snapshot、outbox 广播发布和管理端工作台，但尚未实现正式压测脚本。本轮继续只记录单元级结果：30 和 100 并发出价均通过当前价单调、最高出价人唯一、`bidCount` 与 accepted Bid 数一致的断言；WebSocket 房间隔离和私有提醒通过 fake gateway 单元测试验证。Day 11/Day 12 后需要用 k6 或 Artillery 对真实 HTTP + Redis + MySQL + Socket.IO 环境补充性能数据。
 
 ## 1. 测试环境
 
 | 字段 | 内容 |
 | --- | --- |
-| 日期 | 待填 |
+| 日期 | 2026-05-27 |
 | 机器配置 | 待填 |
 | Node.js 版本 | 待填 |
 | 数据库 | MySQL，版本待填 |
 | Redis | 版本待填 |
-| 后端启动方式 | 待填 |
-| 压测工具 | Artillery / k6，待定 |
+| 后端启动方式 | 未启动真实服务；当前为 Node 内置测试 + fake Prisma/fake Redis store/fake Socket.IO gateway |
+| 压测工具 | 待补充 k6 / Artillery；本轮不是正式压测 |
 
 ## 2. 场景记录
 
 | scenario | environment | WebSocket connections | bid attempts | success rate | avg latency | p95 latency | max latency | observed errors | consistency verification |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 30 并发出价 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 |
-| 100 并发出价 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 |
-| 1000 WebSocket 连接 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 |
+| 30 并发出价 | 单元级 fake 环境，验证一致性，不作为性能数据 | 0 | 30 | 100% accepted in ordered test inputs | 未测 | 未测 | 未测 | 无 | 通过：当前价单调、最高出价人唯一、bidCount=accepted Bid 数 |
+| 100 并发出价 | 单元级 fake 环境，验证一致性，不作为性能数据 | 0 | 100 | 100% accepted in ordered test inputs | 未测 | 未测 | 未测 | 无 | 通过：当前价单调、最高出价人唯一、bidCount=accepted Bid 数 |
+| WebSocket 房间隔离 | 单元级 fake gateway，验证目标房间，不作为性能数据 | 未测真实连接数 | 0 | 不适用 | 未测 | 未测 | 未测 | 无 | 通过：`BID_ACCEPTED` 到竞拍房间，`LEADING`/`OUTBID` 到用户房间 |
+| 1000 WebSocket 连接 | 未执行：等待正式压测脚本和真实 Socket.IO 服务压测 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 |
 
 ## 3. 一致性校验口径
 
@@ -39,3 +44,14 @@
 - 原始压测输出。
 - 异常日志摘要。
 - 优化前后对比。
+- 真实 Redis Lua + MySQL 环境下的 30/100 HTTP 并发请求延迟。
+
+## 5. 压测准入条件
+
+正式记录结果前必须满足：
+
+- 出价接口返回稳定错误码，不暴露堆栈。
+- `clientBidId` 幂等已实现。
+- 达到封顶价的结算路径已实现并有自动化测试。
+- 压测结束后可校验 `Bid`、`AuctionSession`、`Order` 和 Redis 热状态。
+- WebSocket 压测必须按 `room:{roomId}`、`auction:{auctionId}` 验证事件不泄漏。

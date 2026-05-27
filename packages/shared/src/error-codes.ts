@@ -11,6 +11,7 @@ export enum AuctionErrorCode {
   BidExceedsCapPrice = "BID_EXCEEDS_CAP_PRICE",
   BidderAlreadyLeading = "BIDDER_ALREADY_LEADING",
   DuplicateClientBid = "DUPLICATE_CLIENT_BID",
+  BidPersistenceFailed = "BID_PERSISTENCE_FAILED",
   InvalidAuctionTransition = "INVALID_AUCTION_TRANSITION",
   RuleCannotBeChangedAfterStart = "RULE_CANNOT_BE_CHANGED_AFTER_START",
   OrderAlreadyCreated = "ORDER_ALREADY_CREATED",

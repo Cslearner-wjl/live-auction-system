@@ -1,8 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  AuctionEventType as PrismaAuctionEventType,
   AuctionStatus as PrismaAuctionStatus,
   OrderStatus as PrismaOrderStatus,
+  OutboxStatus as PrismaOutboxStatus,
+  type AuctionEvent,
   type AuctionSession,
   type Order
 } from "@prisma/client";
@@ -29,6 +32,7 @@ interface UpdateAuctionManyArgs {
     status?: PrismaAuctionStatus;
     startTime?: Date;
     endTime?: Date;
+    serverSeq?: number;
     version?: {
       increment: number;
     };
@@ -48,6 +52,7 @@ interface CreateOrderArgs {
 class FakePrisma {
   readonly auctions = new Map<string, AuctionSession>();
   readonly orders = new Map<string, Order>();
+  readonly events = new Map<string, AuctionEvent>();
 
   readonly auctionSession = {
     findUnique: async ({ where }: FindAuctionArgs): Promise<AuctionSession | null> =>
@@ -73,6 +78,7 @@ class FakePrisma {
         status: data.status ?? auction.status,
         startTime: data.startTime ?? auction.startTime,
         endTime: data.endTime ?? auction.endTime,
+        serverSeq: data.serverSeq ?? auction.serverSeq,
         version: auction.version + (data.version?.increment ?? 0)
       });
 
@@ -101,6 +107,44 @@ class FakePrisma {
 
       this.orders.set(order.id, order);
       return order;
+    }
+  };
+
+  readonly auctionEvent = {
+    create: async ({
+      data
+    }: {
+      data: {
+        auctionId: string;
+        roomId: string;
+        type: PrismaAuctionEventType;
+        serverSeq: number;
+        payload: unknown;
+        outboxStatus: PrismaOutboxStatus;
+      };
+    }): Promise<AuctionEvent> => {
+      if (
+        [...this.events.values()].some(
+          (event) => event.auctionId === data.auctionId && event.serverSeq === data.serverSeq
+        )
+      ) {
+        throw new Error(`Duplicate event seq ${data.auctionId}:${data.serverSeq}`);
+      }
+
+      const event: AuctionEvent = {
+        id: `event_${this.events.size + 1}`,
+        auctionId: data.auctionId,
+        roomId: data.roomId,
+        type: data.type,
+        serverSeq: data.serverSeq,
+        payload: data.payload as never,
+        outboxStatus: data.outboxStatus,
+        publishedAt: null,
+        createdAt: new Date("2026-06-01T10:00:01.000Z")
+      };
+
+      this.events.set(event.id, event);
+      return event;
     }
   };
 
@@ -161,6 +205,31 @@ describe("auction state transitions", () => {
 });
 
 describe("AuctionStateMachineService.finishAuction", () => {
+  it("cancels a scheduled auction and writes a cancellation outbox event", async () => {
+    const prisma = new FakePrisma();
+    prisma.auctions.set(
+      "auction_1",
+      makeAuction({
+        status: PrismaAuctionStatus.SCHEDULED,
+        startTime: null,
+        endTime: null
+      })
+    );
+    const service = new AuctionStateMachineService(prisma as unknown as PrismaService);
+
+    const result = await service.cancelAuction("auction_1", {
+      now: new Date("2026-06-01T09:58:00.000Z"),
+      reason: "商品状态异常"
+    });
+
+    assert.equal(result.status, PrismaAuctionStatus.CANCELLED);
+    assert.equal(result.serverSeq, 1);
+    assert.equal(prisma.events.size, 1);
+    const event = [...prisma.events.values()][0];
+    assert.equal(event?.type, PrismaAuctionEventType.AUCTION_CANCELLED);
+    assert.equal(event?.serverSeq, 1);
+  });
+
   it("settles a running auction with a highest bidder as sold and creates one order", async () => {
     const prisma = new FakePrisma();
     prisma.auctions.set(
@@ -181,6 +250,11 @@ describe("AuctionStateMachineService.finishAuction", () => {
     assert.equal(result.order?.buyerId, "user_1");
     assert.equal(result.order?.amountFen, 90000);
     assert.equal(prisma.orders.size, 1);
+    assert.equal(prisma.events.size, 2);
+    assert.deepEqual(
+      [...prisma.events.values()].map((event) => event.type),
+      [PrismaAuctionEventType.AUCTION_ENDED, PrismaAuctionEventType.ORDER_CREATED]
+    );
   });
 
   it("settles a running auction without bids as unsold and does not create orders", async () => {
@@ -195,6 +269,8 @@ describe("AuctionStateMachineService.finishAuction", () => {
     assert.equal(result.auction.status, PrismaAuctionStatus.ENDED_UNSOLD);
     assert.equal(result.order, null);
     assert.equal(prisma.orders.size, 0);
+    assert.equal(prisma.events.size, 1);
+    assert.equal([...prisma.events.values()][0]?.type, PrismaAuctionEventType.AUCTION_ENDED);
   });
 
   it("rejects finishing before endTime", async () => {

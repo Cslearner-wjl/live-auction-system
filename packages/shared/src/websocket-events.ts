@@ -13,6 +13,14 @@ export enum AuctionWebSocketEvent {
   Pong = "PONG"
 }
 
+export enum AuctionClientSocketEvent {
+  JoinRoom = "joinRoom",
+  JoinAuction = "joinAuction",
+  LeaveAuction = "leaveAuction",
+  RequestSnapshot = "requestSnapshot",
+  PlaceBid = "placeBid"
+}
+
 export const auctionRoomName = (auctionId: string) => `auction:${auctionId}`;
 export const liveRoomName = (roomId: string) => `room:${roomId}`;
 export const userRoomName = (userId: string) => `user:${userId}`;

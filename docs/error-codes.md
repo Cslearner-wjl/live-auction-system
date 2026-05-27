@@ -31,6 +31,7 @@
 | `BID_EXCEEDS_CAP_PRICE` | 409 | 是，`BID_REJECTED` | 出价不能超过封顶价 | `capPriceFen`, `amountFen` |
 | `BIDDER_ALREADY_LEADING` | 409 | 是，`BID_REJECTED` | 当前您已是最高价 | `auctionId`, `userId` |
 | `DUPLICATE_CLIENT_BID` | 409 | 是，`BID_REJECTED` 或返回原结果 | 请勿重复提交同一出价 | `auctionId`, `clientBidId` |
+| `BID_PERSISTENCE_FAILED` | 503 | 否 | 出价已进入一致性补偿，请拉取最新快照后重试 | `auctionId`, `userId`, `clientBidId`, `serverSeq` |
 | `INVALID_AUCTION_TRANSITION` | 409 | 否 | 当前竞拍状态不允许该操作 | `from`, `to` |
 | `RULE_CANNOT_BE_CHANGED_AFTER_START` | 409 | 否 | 竞拍开始后不能修改规则 | `auctionId`, `status` |
 | `ORDER_ALREADY_CREATED` | 409 | 否 | 该竞拍已生成订单 | `auctionId`, `orderId` |

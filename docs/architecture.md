@@ -33,8 +33,10 @@ apps/server
   - Public REST API
   - AuctionStateMachineService
   - BidService
+  - AuctionSnapshotService
+  - AuctionEventPublisherService
   - OrderService
-  - WebSocket Gateway
+  - Socket.IO WebSocket Gateway
   - AuctionScheduler
 
 packages/shared
@@ -71,7 +73,6 @@ flowchart LR
   -> 创建 AuctionSession(SCHEDULED)
   -> 启动竞拍
   -> 状态机流转到 RUNNING
-  -> 初始化 Redis 热状态
   -> 安排结束 timer
   -> 写 AuctionEvent
   -> 广播 AUCTION_STARTED
@@ -101,12 +102,24 @@ flowchart LR
   -> 广播 AUCTION_ENDED / ORDER_CREATED
 ```
 
-Day 4 当前实现状态：
+Day 7 当前实现状态：
 
 - `AuctionStateMachineService.finishAuction` 已实现 DB 事务内结算。
 - 有 `highestBidderId` 时流转 `ENDED_SOLD` 并创建唯一订单；无最高出价人时流转 `ENDED_UNSOLD`。
 - `AuctionSchedulerService` 已实现单机 timer 和服务启动后的 `RUNNING` 竞拍恢复扫描。
-- Redis 热状态、事件 outbox、AuditLog 和 WebSocket 广播仍未落地，后续实现必须继续向上述目标数据流收敛。
+- `BidService` 已实现 `POST /auctions/:auctionId/bids`，Redis 热状态在首次出价时按 DB 快照惰性初始化。
+- 出价成功后已写 `Bid`、更新 `AuctionSession`，并写 `AuctionEvent(BID_ACCEPTED, outboxStatus=PENDING)`。
+- Redis accepted 但 DB 写失败时记录 `AuditLog(DB_WRITE_FAILED_AFTER_REDIS_ACCEPTED)` 并返回 `BID_PERSISTENCE_FAILED`。
+- `AuctionSnapshotService` 已提供房间竞拍列表、竞拍详情和重连 snapshot。
+- `AuctionRealtimeGateway` 已支持 `user:{userId}`、`room:{roomId}`、`auction:{auctionId}` 房间加入、snapshot 请求、Socket.IO 出价和心跳。
+- `AuctionEventPublisherService` 已从 DB outbox 发布 WebSocket 事件，并在成功后标记 `PUBLISHED`，失败时标记 `FAILED` 并写审计日志。
+- Redis/DB 自动对账仍未落地，后续实现必须继续向上述目标数据流收敛。
+
+Day 7 管理端实现状态：
+
+- `apps/admin` 已接入管理端 API，提供竞拍列表、状态筛选、启动 / 取消操作和订单列表。
+- 管理端页面只消费 API 状态，不实现竞拍状态机；启动和取消合法性仍由后端状态机兜底。
+- 管理端 API DTO 已补充商品标签、商品图、买家脱敏名和竞拍状态等展示字段。
 
 ### 4.4 断线重连
 
@@ -155,7 +168,7 @@ stateDiagram-v2
 
 ### 6.1 MVP 单机方案
 
-个人开发阶段先采用单机内存调度，便于快速跑通闭环。Day 4 已落地该方案的启动注册、取消清理和启动恢复扫描：
+个人开发阶段先采用单机内存调度，便于快速跑通闭环。Day 5 已落地该方案的启动注册、取消清理、启动恢复扫描和出价延时重排：
 
 - `startAuction` 成功后，按 `endTime` 设置 `setTimeout`。
 - 进程内维护 `auctionId -> timer` 映射。
@@ -215,6 +228,8 @@ auction:{auctionId}:leaderboard
 auction:{auctionId}:client_bid:{clientBidId}
 ```
 
+当前实现中 `auction:{auctionId}:state` 是 hash，包含 `status`、`server_seq`、`extended_count`；其余 key 分别保存当前价、最高出价人、结束时间、出价次数、排行榜和单个 `clientBidId` 的热幂等记录。
+
 出价 Lua 脚本负责：
 
 - 校验竞拍状态。
@@ -265,3 +280,12 @@ serverTime
 ```
 
 客户端必须按 `serverSeq` 处理乱序、重复和跳号事件。完整契约见 `docs/websocket-events.md`。
+
+Day 6 实现边界：
+
+- 当前 WebSocket 使用 Socket.IO，客户端身份优先从 `handshake.auth.userId` 和 `handshake.auth.role` 读取，也兼容 demo header。
+- `BID_ACCEPTED` 按 outbox 事件广播到 `auction:{auctionId}`，并派生 `LEADING`、`OUTBID` 和可选 `AUCTION_EXTENDED` 私有/竞拍房间事件。
+- `AUCTION_STARTED`、`AUCTION_ENDED`、`AUCTION_CANCELLED` 同时发送到 `room:{roomId}` 和 `auction:{auctionId}`。
+- `ORDER_CREATED` 只发送到 `user:{buyerId}`。
+- HTTP 出价失败仍只返回 API 错误；Socket.IO `placeBid` 失败会向当前用户房间发送 `BID_REJECTED`。
+- 当前 outbox 发布器为单进程轮询，多实例部署需要补充事件 claim 或分布式锁。

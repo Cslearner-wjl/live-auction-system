@@ -1,13 +1,16 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
+  AuctionEventType as PrismaAuctionEventType,
   AuctionStatus as PrismaAuctionStatus,
   type AuctionSession,
+  OutboxStatus as PrismaOutboxStatus,
   OrderStatus as PrismaOrderStatus,
   type Order
 } from "@prisma/client";
 import {
   AuctionErrorCode,
   AuctionStatus,
+  AuctionWebSocketEvent,
   allowedAuctionTransitions
 } from "@live-auction/shared";
 import { conflict, notFound } from "../common/api-error";
@@ -16,6 +19,11 @@ import { PrismaService } from "../prisma/prisma.service";
 export interface FinishAuctionOptions {
   now?: Date;
   enforceEndTime?: boolean;
+}
+
+export interface CancelAuctionOptions {
+  now?: Date;
+  reason?: string;
 }
 
 export interface FinishAuctionResult {
@@ -46,31 +54,61 @@ export class AuctionStateMachineService {
     const now = new Date();
     const endTime = new Date(now.getTime() + auction.rule.durationSeconds * 1000);
 
-    const updated = await this.prisma.auctionSession.updateMany({
-      where: {
-        id: auctionId,
-        status: PrismaAuctionStatus.SCHEDULED
-      },
-      data: {
-        status: PrismaAuctionStatus.RUNNING,
-        startTime: now,
-        endTime,
-        version: {
-          increment: 1
+    const nextServerSeq = auction.serverSeq + 1;
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.auctionSession.updateMany({
+        where: {
+          id: auctionId,
+          status: PrismaAuctionStatus.SCHEDULED
+        },
+        data: {
+          status: PrismaAuctionStatus.RUNNING,
+          startTime: now,
+          endTime,
+          serverSeq: nextServerSeq,
+          version: {
+            increment: 1
+          }
         }
+      });
+
+      if (updated.count !== 1) {
+        throw invalidTransition(auction.status as AuctionStatus, AuctionStatus.Running, auctionId);
       }
-    });
 
-    if (updated.count !== 1) {
-      throw invalidTransition(auction.status as AuctionStatus, AuctionStatus.Running, auctionId);
-    }
+      await tx.auctionEvent.create({
+        data: {
+          auctionId,
+          roomId: auction.roomId,
+          type: PrismaAuctionEventType.AUCTION_STARTED,
+          serverSeq: nextServerSeq,
+          payload: {
+            type: AuctionWebSocketEvent.AuctionStarted,
+            auctionId,
+            roomId: auction.roomId,
+            status: AuctionStatus.Running,
+            startPriceFen: auction.startPriceFen,
+            currentPriceFen: auction.currentPriceFen,
+            startTime: now.toISOString(),
+            endTime: endTime.toISOString(),
+            serverSeq: nextServerSeq,
+            serverTime: now.toISOString()
+          },
+          outboxStatus: PrismaOutboxStatus.PENDING
+        }
+      });
 
-    return this.prisma.auctionSession.findUniqueOrThrow({
-      where: { id: auctionId }
+      return tx.auctionSession.findUniqueOrThrow({
+        where: { id: auctionId }
+      });
     });
   }
 
-  async cancelAuction(auctionId: string): Promise<AuctionSession> {
+  async cancelAuction(
+    auctionId: string,
+    options: CancelAuctionOptions = {}
+  ): Promise<AuctionSession> {
     const auction = await this.prisma.auctionSession.findUnique({
       where: { id: auctionId }
     });
@@ -85,27 +123,52 @@ export class AuctionStateMachineService {
       auctionId
     );
 
-    const updated = await this.prisma.auctionSession.updateMany({
-      where: {
-        id: auctionId,
-        status: {
-          in: [PrismaAuctionStatus.SCHEDULED, PrismaAuctionStatus.RUNNING]
+    const now = options.now ?? new Date();
+    const nextServerSeq = auction.serverSeq + 1;
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.auctionSession.updateMany({
+        where: {
+          id: auctionId,
+          status: {
+            in: [PrismaAuctionStatus.SCHEDULED, PrismaAuctionStatus.RUNNING]
+          }
+        },
+        data: {
+          status: PrismaAuctionStatus.CANCELLED,
+          serverSeq: nextServerSeq,
+          version: {
+            increment: 1
+          }
         }
-      },
-      data: {
-        status: PrismaAuctionStatus.CANCELLED,
-        version: {
-          increment: 1
-        }
+      });
+
+      if (updated.count !== 1) {
+        throw invalidTransition(auction.status as AuctionStatus, AuctionStatus.Cancelled, auctionId);
       }
-    });
 
-    if (updated.count !== 1) {
-      throw invalidTransition(auction.status as AuctionStatus, AuctionStatus.Cancelled, auctionId);
-    }
+      await tx.auctionEvent.create({
+        data: {
+          auctionId,
+          roomId: auction.roomId,
+          type: PrismaAuctionEventType.AUCTION_CANCELLED,
+          serverSeq: nextServerSeq,
+          payload: {
+            type: AuctionWebSocketEvent.AuctionCancelled,
+            auctionId,
+            roomId: auction.roomId,
+            status: AuctionStatus.Cancelled,
+            reason: options.reason ?? null,
+            serverSeq: nextServerSeq,
+            serverTime: now.toISOString()
+          },
+          outboxStatus: PrismaOutboxStatus.PENDING
+        }
+      });
 
-    return this.prisma.auctionSession.findUniqueOrThrow({
-      where: { id: auctionId }
+      return tx.auctionSession.findUniqueOrThrow({
+        where: { id: auctionId }
+      });
     });
   }
 
@@ -177,6 +240,10 @@ export class AuctionStateMachineService {
 
       assertAuctionTransition(auction.status as AuctionStatus, targetStatus, auctionId);
 
+      const endedServerSeq = auction.serverSeq + 1;
+      const orderServerSeq =
+        targetStatus === AuctionStatus.EndedSold ? endedServerSeq + 1 : endedServerSeq;
+
       const updated = await tx.auctionSession.updateMany({
         where: {
           id: auctionId,
@@ -184,6 +251,7 @@ export class AuctionStateMachineService {
         },
         data: {
           status: targetStatus as PrismaAuctionStatus,
+          serverSeq: orderServerSeq,
           version: {
             increment: 1
           }
@@ -205,6 +273,50 @@ export class AuctionStateMachineService {
             }
           })
         : null;
+
+      await tx.auctionEvent.create({
+        data: {
+          auctionId,
+          roomId: auction.roomId,
+          type: PrismaAuctionEventType.AUCTION_ENDED,
+          serverSeq: endedServerSeq,
+          payload: {
+            type: AuctionWebSocketEvent.AuctionEnded,
+            auctionId,
+            roomId: auction.roomId,
+            status: targetStatus,
+            finalPriceFen:
+              targetStatus === AuctionStatus.EndedSold ? auction.currentPriceFen : null,
+            winnerId: auction.highestBidderId,
+            orderId: order?.id ?? null,
+            serverSeq: endedServerSeq,
+            serverTime: now.toISOString()
+          },
+          outboxStatus: PrismaOutboxStatus.PENDING
+        }
+      });
+
+      if (order) {
+        await tx.auctionEvent.create({
+          data: {
+            auctionId,
+            roomId: auction.roomId,
+            type: PrismaAuctionEventType.ORDER_CREATED,
+            serverSeq: orderServerSeq,
+            payload: {
+              type: AuctionWebSocketEvent.OrderCreated,
+              auctionId,
+              roomId: auction.roomId,
+              orderId: order.id,
+              buyerId: order.buyerId,
+              amountFen: order.amountFen,
+              serverSeq: orderServerSeq,
+              serverTime: now.toISOString()
+            },
+            outboxStatus: PrismaOutboxStatus.PENDING
+          }
+        });
+      }
 
       const settledAuction = await tx.auctionSession.findUniqueOrThrow({
         where: { id: auctionId }
