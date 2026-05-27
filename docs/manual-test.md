@@ -70,6 +70,7 @@
 待补真实环境检查：
 
 - 2026-05-27：本机 Docker Desktop 未运行，无法启动 MySQL/Redis，因此浏览器里真实 API 返回 `Failed to fetch`；后续启动 Docker 后补测竞拍列表、启动、取消和订单列表。
+- 2026-05-27：Docker 已启动后补测通过。`/health` 返回 DB/Redis `ok`；管理端页面真实加载 `GET /admin/auctions` 数据，无前端控制台错误；`POST /admin/auctions/auction_1/start` 成功进入 `RUNNING`；`GET /auctions/auction_1/snapshot` 初次联调发现 `RealtimeController` 未显式注入 `AuctionSnapshotService` 导致 500，已修复并补单元测试；`POST /admin/auctions/auction_1/cancel` 成功返回 `CANCELLED`；最后执行 seed 恢复 `auction_1` 为 `SCHEDULED`。
 
 ## 记录格式
 

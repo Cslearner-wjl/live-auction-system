@@ -155,3 +155,15 @@
 | human-reviewed decisions | 不引入 Ant Design 等大型 UI 依赖，沿用轻量 React/CSS；页面只消费 API 返回状态，不复制竞拍状态机逻辑；订单列表用后端补充的商品和买家字段展示；真实 API 浏览器联调因 Docker Desktop 未运行暂记为待补测 |
 | tests run | `pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/admin typecheck`、`pnpm --filter @live-auction/server test`、浏览器打开 `http://localhost:5173/` 检查管理端页面标题、竞拍列表、订单 tab 和控制台错误 |
 | known issues | 本机 Docker Desktop 未运行，无法启动 MySQL/Redis 做真实接口浏览器联调；管理端创建商品/竞拍表单仍在 Day 10 范围；移动端真实页面联动和正式压测仍未完成 |
+
+## 2026-05-27
+
+| 字段 | 内容 |
+| --- | --- |
+| task | Docker 启动后补做 Day 7 真实接口和管理端页面审查 |
+| prompt summary | 用户已启动 Docker，要求审查 Day 7 实现 |
+| files changed | `apps/server/src/realtime/realtime.controller.ts`、`apps/server/src/realtime/realtime.controller.test.ts`、`docs/manual-test.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | 真实 Docker 联调步骤、`RealtimeController` 显式 DI 修复、注入元数据单元测试、手工测试记录 |
+| human-reviewed decisions | 保持控制器只代理 snapshot 服务，不移动业务逻辑；修复采用显式 `@Inject(AuctionSnapshotService)`，与项目内其他服务的 Nest DI 写法保持一致；启动/取消真实接口测试后执行 seed 恢复 demo 基线 |
+| tests run | `docker ps`、`docker compose ps`、`pnpm --filter @live-auction/server prisma:generate`、`pnpm --filter @live-auction/server exec prisma migrate status --schema prisma/schema.prisma`、`pnpm --filter @live-auction/server prisma:seed`、启动 server/admin、请求 `/health`、`GET /admin/auctions`、`GET /admin/orders`、浏览器打开 `http://localhost:5173/`、`POST /admin/auctions/auction_1/start`、`GET /auctions/auction_1/snapshot`、`POST /admin/auctions/auction_1/cancel`、`pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/server test` |
+| known issues | GitHub HTTPS 凭据仍未配置，之前本地提交无法推送；移动端真实 REST/Socket.IO 页面联动和正式压测仍未完成 |

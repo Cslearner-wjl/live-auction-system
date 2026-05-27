@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Req, UseGuards } from "@nestjs/common";
+import { Controller, Get, Inject, Param, Req, UseGuards } from "@nestjs/common";
 import {
   BidderDemoAuthGuard,
   type DemoRequest
@@ -8,7 +8,10 @@ import { AuctionSnapshotService } from "./auction-snapshot.service";
 @Controller()
 @UseGuards(BidderDemoAuthGuard)
 export class RealtimeController {
-  constructor(private readonly snapshots: AuctionSnapshotService) {}
+  constructor(
+    @Inject(AuctionSnapshotService)
+    private readonly snapshots: AuctionSnapshotService
+  ) {}
 
   @Get("rooms/:roomId/auctions")
   listRoomAuctions(@Param("roomId") roomId: string) {
