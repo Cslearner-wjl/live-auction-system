@@ -2,7 +2,7 @@
 
 本文档用于记录难以完全自动化的演示级流程。每次完成相关功能后，在结果栏记录日期、环境和结论。
 
-当前基线：Day 7 已完成。出价 API、Redis Lua、封顶成交、防狙击延时、Socket.IO 房间隔离、outbox 广播、重连 snapshot 和管理端工作台已有自动化或浏览器渲染检查；移动端真实页面联动尚未实现，相关场景继续保留为 Day 8/Day 9 验收入口。
+当前基线：Day 9 已完成。出价 API、Redis Lua、封顶成交、防狙击延时、Socket.IO 房间隔离、outbox 广播、重连 snapshot、管理端工作台和移动端真实 REST / Socket.IO 页面已有自动化、类型检查或构建检查；多窗口真实浏览器联动和正式压测仍需后续补测。
 
 | 场景 | 前置条件 | 操作 | 预期结果 | 结果 |
 | --- | --- | --- | --- | --- |
@@ -13,12 +13,12 @@
 | 后台取消竞拍 | 竞拍为 `SCHEDULED` 或 `RUNNING` | 调用 `POST /admin/auctions/:id/cancel` 并填写原因 | 状态变为 `CANCELLED`，返回取消原因和时间，写入 `AUCTION_CANCELLED` outbox | 2026-05-27：状态机单元测试覆盖取消 outbox；真实接口待 Docker 环境补测 |
 | 无人出价到期流拍 | 已创建并启动竞拍，时长较短 | 不提交任何出价，等待到期 | 状态变为 `ENDED_UNSOLD`，不生成订单；outbox 产生并广播 `AUCTION_ENDED` | 2026-05-26：状态机 outbox 事件单元测试覆盖，真实 timer 接口流程待测 |
 | 单人出价成交 | 竞拍运行中 | 用户 A 提交有效出价，等待到期 | 状态变为 `ENDED_SOLD`，生成一个订单，买家为用户 A | 2026-05-25：出价落库路径和状态机成交单元测试已覆盖；真实接口流程待测 |
-| 多人连续出价 | 竞拍运行中，至少 2 个用户窗口 | 用户 A、B 交替按固定幅度出价 | 当前价单调递增，最高出价人唯一，被超越用户收到提醒 | 2026-05-26：服务端出价单元测试覆盖当前价单调，outbox 单元测试覆盖 `OUTBID`/`LEADING` 目标房间；移动端可视化待接入 |
+| 多人连续出价 | 竞拍运行中，至少 2 个用户窗口 | 用户 A、B 交替按固定幅度出价 | 当前价单调递增，最高出价人唯一，被超越用户收到提醒 | 2026-05-26：服务端出价单元测试覆盖当前价单调，outbox 单元测试覆盖 `OUTBID`/`LEADING` 目标房间；2026-05-29：移动端已接入真实事件，真实多窗口待补测 |
 | 重复 clientBidId | 竞拍运行中 | 同一用户用相同 `clientBidId` 重复提交 | 不产生重复 Bid，返回幂等结果或 `DUPLICATE_CLIENT_BID` | 2026-05-25：服务端单元测试已覆盖已落库幂等和并发热幂等 |
 | 最后 N 秒自动延时 | 配置防狙击窗口和延时时长 | 在结束前 N 秒提交有效出价 | `endTime` 延后，广播 `AUCTION_EXTENDED`，旧 timer 不再结算 | 2026-05-26：服务端单元测试已覆盖延时、timer 重排和 `AUCTION_EXTENDED` 派发 |
 | 封顶价立即成交 | 配置封顶价 | 用户提交达到封顶价的有效出价 | 立即结算为 `ENDED_SOLD`，只生成一个订单 | 2026-05-25：服务端单元测试已覆盖封顶成交和并发封顶单订单 |
 | 主播取消竞拍 | 竞拍 `SCHEDULED` 或 `RUNNING` | 后台点击取消并填写原因 | 状态变为 `CANCELLED`，本进程结束 timer 被清理；广播 `AUCTION_CANCELLED` | 2026-05-26：状态机写取消 outbox，发布器房间派发单元测试覆盖；端到端待测 |
-| 断线重连 snapshot 恢复 | 竞拍运行中且已有出价 | 断开移动端 WebSocket 后重连 | 重新拉取 snapshot，当前价、倒计时和领先状态正确 | 2026-05-26：`AuctionSnapshotService` 和 gateway `requestSnapshot` 单元测试覆盖；移动端页面待接入 |
+| 断线重连 snapshot 恢复 | 竞拍运行中且已有出价 | 断开移动端 WebSocket 后重连 | 重新拉取 snapshot，当前价、倒计时和领先状态正确 | 2026-05-26：`AuctionSnapshotService` 和 gateway `requestSnapshot` 单元测试覆盖；2026-05-29：移动端已接入 `requestSnapshot` 和 REST snapshot，真实断网重连待补测 |
 | 订单唯一性 | 多用户并发冲击封顶价 | 同时提交多个达到封顶价的出价 | 仅一个最高出价人，仅一个订单 | 2026-05-25：服务端单元测试已覆盖并发封顶只接受一个出价、只创建一个订单 |
 
 ## Day 4 补充检查
@@ -55,8 +55,8 @@
 仍需后续端到端或手工验证：
 
 - 两个真实浏览器窗口通过 Socket.IO 实时同步。
-- 移动端页面按 `serverSeq` 丢弃旧事件并在跳号时重拉 snapshot。
-- 竞拍结束事件禁用移动端出价按钮。
+- 人为构造乱序 / 跳号事件，验证移动端页面按 `serverSeq` 丢弃旧事件并在跳号时重拉 snapshot。
+- 真实 timer 到期或封顶成交后，移动端收到竞拍结束事件并禁用出价按钮。
 
 ## Day 7 自动化和页面检查
 
@@ -71,6 +71,36 @@
 
 - 2026-05-27：本机 Docker Desktop 未运行，无法启动 MySQL/Redis，因此浏览器里真实 API 返回 `Failed to fetch`；后续启动 Docker 后补测竞拍列表、启动、取消和订单列表。
 - 2026-05-27：Docker 已启动后补测通过。`/health` 返回 DB/Redis `ok`；管理端页面真实加载 `GET /admin/auctions` 数据，无前端控制台错误；`POST /admin/auctions/auction_1/start` 成功进入 `RUNNING`；`GET /auctions/auction_1/snapshot` 初次联调发现 `RealtimeController` 未显式注入 `AuctionSnapshotService` 导致 500，已修复并补单元测试；`POST /admin/auctions/auction_1/cancel` 成功返回 `CANCELLED`；最后执行 seed 恢复 `auction_1` 为 `SCHEDULED`。
+
+## Day 8 移动端 mock 页面检查
+
+已覆盖：
+
+- `apps/mobile` 类型检查覆盖直播间页面组件和 mock service 类型边界。
+- `apps/mobile` production build 产物生成通过。
+- 浏览器打开 `http://localhost:5174/`，确认主播信息、直播背景、评论流、底部互动区和竞拍小卡片渲染。
+- 点击竞拍小卡片可打开底部半屏竞拍面板，关闭按钮和遮罩可关闭。
+- 面板内 `+` / `-` 按固定加价幅度调整本次出价，金额不会低于下一口价或超过封顶价。
+- 点击“立即出价”后本地 snapshot 更新当前价、我的出价、排名、评论流和 toast；当前用户领先时出价按钮禁用。
+- 页面会触发一次本地模拟对手超越，展示“你已被超越”，并恢复可继续出价的状态。
+
+## Day 9 移动端真实联动检查
+
+已覆盖：
+
+- `apps/mobile` 类型检查覆盖真实 REST service、Socket.IO client 封装和页面状态接入。
+- `apps/mobile` production build 产物生成通过。
+- 移动端进入直播间后会拉取真实 `GET /rooms/:roomId/auctions`、`GET /auctions/:auctionId` 和 `GET /auctions/:auctionId/snapshot`。
+- 移动端提交真实 `POST /auctions/:auctionId/bids`，生成稳定 `clientBidId`，并展示后端错误消息。
+- 移动端通过 Socket.IO 加入 `room:{roomId}`、`auction:{auctionId}`，请求 `AUCTION_SNAPSHOT`，并处理 `BID_ACCEPTED`、`LEADING`、`OUTBID`、`AUCTION_EXTENDED`、`AUCTION_ENDED`、`ORDER_CREATED` 和 `AUCTION_CANCELLED`。
+- 移动端用 `serverTime` 校准倒计时，用 `serverSeq` 丢弃旧事件并在跳号时重新拉 snapshot。
+- 2026-05-29：Docker MySQL/Redis、服务端和移动端 dev server 环境下，seed 后启动 `auction_1`，`user_1` 通过真实 HTTP 出价到 ¥10，浏览器打开 `http://localhost:5174/?userId=user_2` 拉取真实 snapshot，面板提交 ¥20 成功，页面更新当前价、排行榜、我的排名和领先禁用状态；浏览器 error/warning 日志为空。
+
+待补真实环境检查：
+
+- 打开 `http://localhost:5174/?userId=user_1` 和 `http://localhost:5174/?userId=user_2`，交替出价，验证当前价、排行榜、领先 / 被超越提示同步。
+- 手动断开移动端网络或刷新页面，验证重连后 snapshot 恢复最新价格、倒计时和我的排名。
+- 等待到期或冲击封顶价，验证竞拍结束后移动端禁用出价并展示成交 / 流拍状态。
 
 ## 记录格式
 

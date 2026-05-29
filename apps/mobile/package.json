@@ -10,13 +10,14 @@
     "preview": "vite preview --host 0.0.0.0 --port 4174"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "^4.5.2",
-    "vite": "^6.3.5",
-    "typescript": "^5.8.3",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
+    "@live-auction/shared": "workspace:*",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
-    "@live-auction/shared": "workspace:*"
+    "@vitejs/plugin-react": "^4.5.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "socket.io-client": "^4.8.3",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
   }
 }

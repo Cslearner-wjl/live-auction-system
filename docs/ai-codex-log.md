@@ -167,3 +167,27 @@
 | human-reviewed decisions | 保持控制器只代理 snapshot 服务，不移动业务逻辑；修复采用显式 `@Inject(AuctionSnapshotService)`，与项目内其他服务的 Nest DI 写法保持一致；启动/取消真实接口测试后执行 seed 恢复 demo 基线 |
 | tests run | `docker ps`、`docker compose ps`、`pnpm --filter @live-auction/server prisma:generate`、`pnpm --filter @live-auction/server exec prisma migrate status --schema prisma/schema.prisma`、`pnpm --filter @live-auction/server prisma:seed`、启动 server/admin、请求 `/health`、`GET /admin/auctions`、`GET /admin/orders`、浏览器打开 `http://localhost:5173/`、`POST /admin/auctions/auction_1/start`、`GET /auctions/auction_1/snapshot`、`POST /admin/auctions/auction_1/cancel`、`pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/server test` |
 | known issues | GitHub HTTPS 凭据仍未配置，之前本地提交无法推送；移动端真实 REST/Socket.IO 页面联动和正式压测仍未完成 |
+
+## 2026-05-28
+
+| 字段 | 内容 |
+| --- | --- |
+| task | Day 8 开发：移动端直播间主页面、竞拍半屏面板和本地 mock 出价交互 |
+| prompt summary | 用户要求继续实现 Day 8 相关任务并更新文档 |
+| files changed | `apps/mobile/src/App.tsx`、`apps/mobile/src/styles.css`、`apps/mobile/src/mobile-auction-service.ts`、`README.md`、`docs/README.md`、`docs/progress.md`、`docs/architecture.md`、`docs/manual-test.md`、`docs/performance-report.md`、`docs/demo-script.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | 移动端直播间页面、竞拍小卡片、底部半屏面板、出价步进器、倒计时、toast、本地 mock 出价 service、Day 8 文档和学习沉淀 |
+| human-reviewed decisions | Day 8 只做移动端体验骨架和 mock 交互，不接入真实 REST / Socket.IO；mock service 使用 `AuctionSnapshot` 形状，为 Day 9 替换为真实 service 留边界；移动端不复制服务端状态机，本地成交和被超越只作为交互演示 |
+| tests run | `pnpm --filter @live-auction/mobile typecheck`、`pnpm --filter @live-auction/mobile build`、`pnpm typecheck`、`pnpm test`、`pnpm lint`、尝试 `pnpm test:e2e` 但根脚本不存在、浏览器打开 `http://localhost:5174/` 检查移动端页面、小卡片、半屏面板、本地出价和控制台错误 |
+| known issues | 移动端仍未接入真实 REST / Socket.IO、`serverSeq` 乱序处理和真实错误码展示；外部图片 URL 在离线环境下可能无法显示；仓库尚无 `test:e2e` 脚本；正式压测脚本和 Redis/DB 自动对账仍未完成 |
+
+## 2026-05-29
+
+| 字段 | 内容 |
+| --- | --- |
+| task | Day 9 开发：移动端接入真实 REST API 和 Socket.IO，并修复真实联调暴露的序列与 seed 重置问题 |
+| prompt summary | 用户要求按照相应文档继续实现 Day 9，并在完成后更新相应文档 |
+| files changed | `apps/mobile/package.json`、`apps/mobile/src/App.tsx`、`apps/mobile/src/mobile-auction-service.ts`、`apps/mobile/src/styles.css`、`apps/server/src/bid/bid-redis.store.ts`、`apps/server/src/bid/bid.service.test.ts`、`apps/server/prisma/seed.ts`、`pnpm-lock.yaml`、`README.md`、`docs/README.md`、`docs/progress.md`、`docs/api.md`、`docs/architecture.md`、`docs/websocket-events.md`、`docs/manual-test.md`、`docs/performance-report.md`、`docs/demo-script.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | 移动端真实 REST service、Socket.IO client 接入、snapshot / `serverSeq` 顺序控制、真实 HTTP 出价、错误消息展示、加载失败状态、demo seed 清理、Redis Lua `serverSeq` 初始化修复、Day 9 文档和学习沉淀 |
+| human-reviewed decisions | 移动端本轮以 HTTP `POST /auctions/:auctionId/bids` 为主出价路径，Socket.IO 用于房间加入、snapshot 和 outbox 事件；WebSocket 事件只做 UI 提示和轻量补丁，随后以 snapshot 对齐完整状态；前端禁用按钮只做体验保护，幂等仍依赖服务端 `clientBidId`；真实联调发现 Redis Lua 初始 `server_seq=0` 会与启动事件冲突，修复为继承 DB `serverSeq` |
+| tests run | `pnpm --filter @live-auction/mobile typecheck`、`pnpm --filter @live-auction/mobile build`、`pnpm --filter @live-auction/server prisma:seed`、真实接口启动 `auction_1` 并提交 HTTP 出价、浏览器打开 `http://localhost:5174/?userId=user_2` 提交真实出价并检查 error/warning 日志为空、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm lint` |
+| known issues | 仓库仍无 `test:e2e` 脚本；真实双窗口持续联动、断网重连和乱序/跳号事件仍需后续 E2E 或手工补测；正式 k6/Artillery 压测和 Redis/DB 自动对账任务仍未完成；移动端主出价路径暂为 HTTP，Socket.IO `placeBid` 保留为服务端能力 |

@@ -361,6 +361,21 @@ describe("BidService.placeBid", () => {
     assert.equal(prisma.events[0]?.type, PrismaAuctionEventType.BID_ACCEPTED);
   });
 
+  it("continues serverSeq after the auction start event", async () => {
+    const { prisma, service } = makeBidService({
+      serverSeq: 1
+    });
+
+    const result = await service.placeBid("auction_1", "user_1", {
+      amountFen: 1000,
+      clientBidId: "after_start"
+    });
+
+    assert.equal(result.serverSeq, 2);
+    assert.equal(prisma.events[0]?.serverSeq, 2);
+    assert.equal([...prisma.bids.values()][0]?.serverSeq, 2);
+  });
+
   it("rejects low, invalid-increment, repeated-leading, over-cap, and ended bids", async () => {
     const low = makeBidService();
     await assert.rejects(

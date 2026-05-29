@@ -6,7 +6,7 @@
 商品上架 -> 规则配置 -> 直播间展示 -> 实时出价 -> 动态排名 -> 竞拍结束 -> 成交订单
 ```
 
-当前处于 Day 7：服务端出价 API、Redis Lua 原子出价、幂等、封顶成交、防狙击延时、WebSocket 房间隔离、断线重连 snapshot、outbox 广播发布和主播端管理后台联调已落地；移动端真实页面联动和正式压测仍在后续范围。
+当前处于 Day 9：服务端出价 API、Redis Lua 原子出价、幂等、封顶成交、防狙击延时、WebSocket 房间隔离、断线重连 snapshot、outbox 广播发布、主播端管理后台联调和移动端真实 REST / Socket.IO 竞拍联动已落地；正式压测仍在后续范围。
 
 ## 技术栈
 
@@ -178,10 +178,31 @@ curl http://localhost:3000/health
 - 补充取消竞拍写入 `AUCTION_CANCELLED` outbox 的单元测试，延续 Day 6 发布器房间隔离覆盖。
 - 文档、AI 协作日志和本地学习文档同步到 Day 7。
 
+## Day 8 完成内容
+
+- 移动端从占位页升级为直播间主体验，包含主播信息、在线人数、直播画面、评论流、底部互动区和竞拍商品小卡片。
+- 竞拍小卡片展示商品图、当前价 / 起拍价、倒计时和出价次数，点击后打开底部半屏竞拍面板。
+- 半屏面板展示商品详情、卖点、起拍价、加价幅度、封顶价、防狙击延时摘要、我的出价状态和实时排名。
+- 新增本地 mock 出价交互：`+` / `-` 步进、立即出价、领先提示、一次模拟被超越提醒、倒计时最后 10 秒视觉增强和封顶成交本地反馈。
+- 新增 `mobile-auction-service.ts`，用 `AuctionSnapshot` 形状承接 mock 数据和本地出价计算，为 Day 9 接真实 REST / Socket.IO 预留边界。
+- 文档、AI 协作日志和本地学习文档同步到 Day 8。
+
+## Day 9 完成内容
+
+- `apps/mobile` 首次进入直播间会读取 `GET /rooms/:roomId/auctions`、`GET /auctions/:auctionId` 和 `GET /auctions/:auctionId/snapshot`。
+- 移动端通过服务端 `serverTime` 校准倒计时，通过 `serverSeq` 丢弃旧事件，发现跳号时重新拉取 snapshot。
+- `mobile-auction-service.ts` 已替换为真实 REST service，并新增 Socket.IO client 封装。
+- Socket.IO 连接后加入 `room:{roomId}` 和 `auction:{auctionId}`，并通过 `requestSnapshot` 做重连恢复。
+- 出价按钮提交真实 `POST /auctions/:auctionId/bids`，生成稳定 `clientBidId`，并展示服务端错误消息。
+- 移动端处理 `BID_ACCEPTED`、`LEADING`、`OUTBID`、`AUCTION_EXTENDED`、`AUCTION_ENDED`、`ORDER_CREATED` 和 `AUCTION_CANCELLED`。
+- 保留 `?roomId=room_1&userId=user_2` 这类查询参数，便于多窗口模拟不同用户联调。
+- 修复 demo seed 和 Redis 出价序列初始化问题，`auction_1` 可以重复 seed、启动并完成真实出价联调。
+
 ## 当前限制
 
-- 移动端仍是骨架占位，尚未接入真实 REST / Socket.IO 事件。
-- 管理端已接入真实 API，但本轮本机 Docker Desktop 未运行，真实 MySQL/Redis 环境下的浏览器联调待补测。
+- 移动端真实出价依赖服务端、MySQL、Redis 已启动，且目标竞拍已经由后台启动为 `RUNNING`。
+- 移动端当前以 HTTP `POST /auctions/:auctionId/bids` 作为主出价路径，Socket.IO `placeBid` 仍作为服务端能力保留。
+- 管理端创建商品和竞拍表单仍在 Day 10 范围，当前后台优先覆盖列表、状态筛选、启动 / 取消和订单查看。
 - 当前结束调度是 MVP 单机 timer，多实例部署需要切换到 Redis delayed queue 或 BullMQ。
 - Redis accepted 但 DB 写失败时暂按 MVP 补偿策略处理：不广播成功，记录审计日志，后续需要实现 Redis/DB 对账任务。
 - 封顶成交会让数据库 `serverSeq` 继续推进到结束和订单事件；Redis 热状态中的 seq/status 暂不反向同步，后续对账任务需要覆盖。

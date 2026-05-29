@@ -100,6 +100,7 @@ export class RedisBidAtomicStore {
         String(input.auction.rule.extensionSeconds),
         String(input.auction.rule.maxExtensionCount),
         String(input.auction.extendedCount),
+        String(input.auction.serverSeq),
         String(this.hotKeyTtlSeconds)
       ]
     });
@@ -210,7 +211,8 @@ local antiSnipingWindowSeconds = tonumber(ARGV[13])
 local extensionSeconds = tonumber(ARGV[14])
 local maxExtensionCount = tonumber(ARGV[15])
 local dbExtendedCount = tonumber(ARGV[16])
-local ttlSeconds = tonumber(ARGV[17])
+local dbServerSeq = tonumber(ARGV[17])
+local ttlSeconds = tonumber(ARGV[18])
 
 local function expireKey(key)
   if ttlSeconds and ttlSeconds > 0 then
@@ -237,7 +239,7 @@ end
 local status = redis.call("HGET", stateKey, "status")
 if not status then
   status = dbStatus
-  redis.call("HSET", stateKey, "status", status, "server_seq", "0", "extended_count", tostring(dbExtendedCount))
+  redis.call("HSET", stateKey, "status", status, "server_seq", tostring(dbServerSeq), "extended_count", tostring(dbExtendedCount))
   redis.call("SET", currentPriceKey, tostring(dbCurrentPriceFen))
   redis.call("SET", endTimeKey, tostring(dbEndTimeMs))
   redis.call("SET", bidCountKey, tostring(dbBidCount))

@@ -1,16 +1,16 @@
 # 性能测试报告
 
-本文档只记录可复现的真实性能数据。当前尚未完成外部压测；Day 5-Day 7 已补充服务端单元级一致性、房间隔离和管理端类型检查，不能等同于真实性能数据。
+本文档只记录可复现的真实性能数据。当前尚未完成外部压测；Day 5-Day 9 已补充服务端单元级一致性、房间隔离、管理端类型检查和移动端真实联动构建检查，不能等同于真实性能数据。
 
 ## 0. 当前状态
 
-当前基线为 Day 7，已实现用户端出价 API、Redis Lua 原子出价、Socket.IO 房间隔离、重连 snapshot、outbox 广播发布和管理端工作台，但尚未实现正式压测脚本。本轮继续只记录单元级结果：30 和 100 并发出价均通过当前价单调、最高出价人唯一、`bidCount` 与 accepted Bid 数一致的断言；WebSocket 房间隔离和私有提醒通过 fake gateway 单元测试验证。Day 11/Day 12 后需要用 k6 或 Artillery 对真实 HTTP + Redis + MySQL + Socket.IO 环境补充性能数据。
+当前基线为 Day 9，已实现用户端出价 API、Redis Lua 原子出价、Socket.IO 房间隔离、重连 snapshot、outbox 广播发布、管理端工作台和移动端真实 REST / Socket.IO 联动，但尚未实现正式压测脚本。本轮继续只记录单元级和构建结果：30 和 100 并发出价均通过当前价单调、最高出价人唯一、`bidCount` 与 accepted Bid 数一致的断言；WebSocket 房间隔离和私有提醒通过 fake gateway 单元测试验证；移动端 Day 9 只做类型检查和 production build，不产生性能数据。Day 11/Day 12 后需要用 k6 或 Artillery 对真实 HTTP + Redis + MySQL + Socket.IO 环境补充性能数据。
 
 ## 1. 测试环境
 
 | 字段 | 内容 |
 | --- | --- |
-| 日期 | 2026-05-27 |
+| 日期 | 2026-05-29 |
 | 机器配置 | 待填 |
 | Node.js 版本 | 待填 |
 | 数据库 | MySQL，版本待填 |
@@ -25,6 +25,7 @@
 | 30 并发出价 | 单元级 fake 环境，验证一致性，不作为性能数据 | 0 | 30 | 100% accepted in ordered test inputs | 未测 | 未测 | 未测 | 无 | 通过：当前价单调、最高出价人唯一、bidCount=accepted Bid 数 |
 | 100 并发出价 | 单元级 fake 环境，验证一致性，不作为性能数据 | 0 | 100 | 100% accepted in ordered test inputs | 未测 | 未测 | 未测 | 无 | 通过：当前价单调、最高出价人唯一、bidCount=accepted Bid 数 |
 | WebSocket 房间隔离 | 单元级 fake gateway，验证目标房间，不作为性能数据 | 未测真实连接数 | 0 | 不适用 | 未测 | 未测 | 未测 | 无 | 通过：`BID_ACCEPTED` 到竞拍房间，`LEADING`/`OUTBID` 到用户房间 |
+| 移动端 Day 9 真实联动页面 | Vite typecheck + build，不作为性能数据 | 0 | 0 | 不适用 | 未测 | 未测 | 未测 | 无 | 通过：真实 REST service、Socket.IO client 接入和页面构建通过 |
 | 1000 WebSocket 连接 | 未执行：等待正式压测脚本和真实 Socket.IO 服务压测 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 | 待填 |
 
 ## 3. 一致性校验口径

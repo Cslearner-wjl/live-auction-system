@@ -67,6 +67,10 @@ auction:{auctionId}:client_bid:{clientBidId}
 
 热状态在首次出价时按 DB 快照惰性初始化；竞拍完成后当前实现通过 24 小时 TTL 回收热 key，后续可在结算流程中显式缩短 TTL。
 
+Day 9 修复：Redis Lua 首次初始化 `auction:{auctionId}:state.server_seq` 时必须继承数据库 `AuctionSession.serverSeq`，不能固定从 `0` 开始。否则竞拍启动已写入 `AUCTION_STARTED(serverSeq=1)` 后，第一口出价会再次生成 `BID_ACCEPTED(serverSeq=1)`，触发 `auction_events(auctionId, serverSeq)` 唯一约束冲突并返回 `BID_PERSISTENCE_FAILED`。
+
+Demo seed 重置规则：重置固定演示竞拍 `auction_1` 时，需要同步清理该竞拍的历史 `Bid`、`Order`、`AuctionEvent`、`AuditLog` 和 Redis 热 key，再把 `AuctionSession.serverSeq` 归零。只重置 `auction_sessions` 会保留旧 outbox 序列或 Redis 热状态，导致重复开拍、出价联调不稳定。
+
 ## 3. 拒绝出价
 
 拒绝原因由 Redis Lua 或服务层返回稳定错误码：

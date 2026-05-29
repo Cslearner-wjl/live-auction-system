@@ -1,6 +1,6 @@
 # WebSocket 事件契约
 
-本文档定义直播竞拍系统的 WebSocket 契约。事件名必须与 `packages/shared/src/websocket-events.ts` 保持一致。Day 6 服务端已基于 Socket.IO 实现 gateway、房间加入、snapshot 请求、心跳、Socket.IO 出价和 outbox 广播；移动端页面尚未接入真实事件。
+本文档定义直播竞拍系统的 WebSocket 契约。事件名必须与 `packages/shared/src/websocket-events.ts` 保持一致。Day 6 服务端已基于 Socket.IO 实现 gateway、房间加入、snapshot 请求、心跳、Socket.IO 出价和 outbox 广播；Day 9 移动端已接入真实 Socket.IO 事件，并以 snapshot 作为权威状态来源。
 
 ## 1. 房间约定
 
@@ -117,7 +117,7 @@ Socket.IO 客户端优先通过 `handshake.auth` 传身份：
 
 ### placeBid
 
-Socket.IO 出价。HTTP 出价接口仍是主流程；该事件用于移动端后续直接在 WebSocket 通道提交出价。
+Socket.IO 出价。HTTP 出价接口仍是当前移动端主流程；该事件保留为服务端能力，用于后续直接在 WebSocket 通道提交出价。
 
 ```json
 {
@@ -359,7 +359,15 @@ Day 6 已通过服务端单元测试覆盖：
 - 重连后可以拉取包含 `serverSeq` 的最新 snapshot。
 - outbox 发布成功标记 `PUBLISHED`，发布失败标记 `FAILED` 并记录审计日志。
 
-仍需移动端接入和端到端测试覆盖：
+Day 9 移动端已实现的客户端处理：
+
+- 连接后通过 `handshake.auth` 传 `userId` 和 `role: bidder`。
+- 加入 `room:{roomId}` 和 `auction:{auctionId}` 后请求 `AUCTION_SNAPSHOT`。
+- 以 `serverSeq` 丢弃旧事件，发现跳号时重新拉取 `GET /auctions/:auctionId/snapshot`。
+- 使用 `serverTime` 和 `endTime` 校准倒计时。
+- 处理 `BID_ACCEPTED`、`LEADING`、`OUTBID`、`AUCTION_EXTENDED`、`AUCTION_ENDED`、`ORDER_CREATED`、`AUCTION_CANCELLED` 和 `BID_REJECTED`。
+
+仍需端到端测试覆盖：
 
 - 不同直播间和不同竞拍之间事件不串房。
 - 乱序旧事件不会覆盖新快照。

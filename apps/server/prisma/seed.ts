@@ -5,6 +5,7 @@ import {
   UserRole
 } from "@prisma/client";
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
+import { createClient } from "redis";
 
 const databaseUrl = new URL(
   process.env.DATABASE_URL ?? "mysql://auction:change_me@127.0.0.1:3307/live_auction"
@@ -24,6 +25,7 @@ const adapter = new PrismaMariaDb(
 );
 
 const prisma = new PrismaClient({ adapter });
+const DEMO_AUCTION_ID = "auction_1";
 
 async function main() {
   const admin = await prisma.user.upsert({
@@ -128,8 +130,11 @@ async function main() {
     }
   });
 
+  await resetDemoAuctionHistory(DEMO_AUCTION_ID);
+  await resetDemoAuctionRedisKeys(DEMO_AUCTION_ID);
+
   await prisma.auctionSession.upsert({
-    where: { id: "auction_1" },
+    where: { id: DEMO_AUCTION_ID },
     update: {
       roomId: room.id,
       itemId: item.id,
@@ -148,7 +153,7 @@ async function main() {
       version: 1
     },
     create: {
-      id: "auction_1",
+      id: DEMO_AUCTION_ID,
       roomId: room.id,
       itemId: item.id,
       ruleId: rule.id,
@@ -159,6 +164,54 @@ async function main() {
       capPriceFen: rule.capPriceFen
     }
   });
+}
+
+async function resetDemoAuctionHistory(auctionId: string) {
+  await prisma.auditLog.deleteMany({
+    where: {
+      auctionId
+    }
+  });
+  await prisma.auctionEvent.deleteMany({
+    where: {
+      auctionId
+    }
+  });
+  await prisma.order.deleteMany({
+    where: {
+      auctionId
+    }
+  });
+  await prisma.bid.deleteMany({
+    where: {
+      auctionId
+    }
+  });
+}
+
+async function resetDemoAuctionRedisKeys(auctionId: string) {
+  const client = createClient({
+    url: process.env.REDIS_URL ?? "redis://127.0.0.1:6379"
+  });
+
+  try {
+    await client.connect();
+    const keys = await client.keys(`auction:${auctionId}:*`);
+
+    if (keys.length > 0) {
+      await client.del(keys);
+    }
+  } catch (error: unknown) {
+    console.warn(
+      `Skipped Redis cleanup for ${auctionId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  } finally {
+    if (client.isOpen) {
+      await client.quit();
+    }
+  }
 }
 
 main()

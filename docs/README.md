@@ -1,15 +1,15 @@
 # 文档索引
 
-当前基线：Day 7 已完成。服务端用户出价 API、Redis Lua 原子出价、幂等、封顶成交、防狙击延时、Socket.IO 房间隔离、断线重连 snapshot、outbox 广播发布和主播端管理后台联调已落地；移动端真实页面联动和正式压测仍为后续目标。
+当前基线：Day 9 已完成。服务端用户出价 API、Redis Lua 原子出价、幂等、封顶成交、防狙击延时、Socket.IO 房间隔离、断线重连 snapshot、outbox 广播发布、主播端管理后台联调和移动端真实 REST / Socket.IO 联动已落地；正式压测仍为后续目标。
 
 ## 必读文档
 
 | 文档 | 用途 | 当前状态 |
 | --- | --- | --- |
-| `progress.md` | Day 1-Day 7 进度、Day 8 下一步 | 持续维护 |
-| `architecture.md` | 模块边界、状态机、调度、一致性总体设计 | Day 7 已对齐 |
-| `api.md` | REST API 契约和已实现范围 | Day 7 已对齐 |
-| `websocket-events.md` | WebSocket 房间、事件和快照契约 | Day 6 服务端已实现，移动端待接入 |
+| `progress.md` | Day 1-Day 9 进度、Day 10 下一步 | 持续维护 |
+| `architecture.md` | 模块边界、状态机、调度、一致性总体设计 | Day 9 已对齐 |
+| `api.md` | REST API 契约和已实现范围 | Day 9 已对齐 |
+| `websocket-events.md` | WebSocket 房间、事件和快照契约 | Day 9 移动端已接入真实事件 |
 | `database-schema.md` | Prisma 数据模型、索引和唯一约束 | Day 2 后持续对齐 |
 | `error-codes.md` | 稳定错误码全集 | 随 shared 包更新 |
 | `consistency.md` | Redis 与数据库一致性方案 | Day 6 outbox 发布已对齐，后续补对账任务 |
@@ -18,9 +18,9 @@
 
 | 文档 | 用途 | 当前状态 |
 | --- | --- | --- |
-| `manual-test.md` | 手工测试清单和执行记录 | Day 7 已补充管理端页面检查 |
+| `manual-test.md` | 手工测试清单和执行记录 | Day 9 已补充移动端真实联动入口 |
 | `performance-report.md` | 压测环境、结果和一致性校验记录 | 有单元级并发测试记录，暂无真实压测数据 |
-| `demo-script.md` | 最终录屏和答辩演示脚本 | 包含 Day 7 管理端可演示范围 |
+| `demo-script.md` | 最终录屏和答辩演示脚本 | 包含 Day 9 移动端真实联动可演示范围 |
 | `ai-codex-log.md` | AI 辅助开发过程记录 | 持续维护 |
 
 ## 背景材料

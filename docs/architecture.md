@@ -102,7 +102,7 @@ flowchart LR
   -> 广播 AUCTION_ENDED / ORDER_CREATED
 ```
 
-Day 7 当前实现状态：
+Day 9 当前实现状态：
 
 - `AuctionStateMachineService.finishAuction` 已实现 DB 事务内结算。
 - 有 `highestBidderId` 时流转 `ENDED_SOLD` 并创建唯一订单；无最高出价人时流转 `ENDED_UNSOLD`。
@@ -120,6 +120,15 @@ Day 7 管理端实现状态：
 - `apps/admin` 已接入管理端 API，提供竞拍列表、状态筛选、启动 / 取消操作和订单列表。
 - 管理端页面只消费 API 状态，不实现竞拍状态机；启动和取消合法性仍由后端状态机兜底。
 - 管理端 API DTO 已补充商品标签、商品图、买家脱敏名和竞拍状态等展示字段。
+
+Day 9 移动端实现状态：
+
+- `apps/mobile` 已实现直播间主页面、竞拍小卡片、底部半屏竞拍面板、出价步进器、倒计时、toast 和本地排行榜展示。
+- `mobile-auction-service.ts` 已替换为真实 REST service，负责读取房间竞拍列表、竞拍详情、snapshot 和提交 HTTP 出价。
+- 移动端 Socket.IO client 连接后加入 `room:{roomId}` 和 `auction:{auctionId}`，并通过 `requestSnapshot` 做首次同步和重连恢复。
+- 页面以 `GET /auctions/:auctionId/snapshot` / `AUCTION_SNAPSHOT` 的 `serverTime`、`serverSeq` 和业务字段作为权威状态来源，不在前端复制竞拍状态机。
+- 移动端按 `serverSeq` 丢弃旧事件，发现跳号时重新拉取 snapshot；`BID_ACCEPTED` 等事件先做轻量 UI 提示，再用 snapshot 对齐完整排行榜和我的排名。
+- 出价按钮提交真实 `POST /auctions/:auctionId/bids`，生成稳定 `clientBidId`，后端错误码和消息直接展示给用户。
 
 ### 4.4 断线重连
 
