@@ -215,3 +215,15 @@
 | human-reviewed decisions | Redis 回滚只在 accepted 出价仍是最新 `serverSeq` 时执行，避免覆盖后续已接受出价；outbox 先复用现有 `FAILED` 状态做重试，不新增迁移字段；Day10 自动化闭环采用服务级 fake 环境，真实 MySQL/Redis/浏览器联调留给 Day11 |
 | tests run | `pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/server test`、`pnpm test:e2e`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm lint` |
 | known issues | Day10 e2e 仍不是完整真实环境浏览器测试；outbox retry 还没有 retry 次数、退避和死信队列；Redis/DB 周期自动对账 worker 未实现；管理端创建商品和竞拍仍是两个接口串行调用 |
+
+## 2026-05-31
+
+| 字段 | 内容 |
+| --- | --- |
+| task | Day 11 开发：端到端联调与异常场景服务级 e2e 补齐 |
+| prompt summary | 用户要求实现 Day 11 任务，并更新相应文档 |
+| files changed | `apps/server/src/day11-auction-scenarios.e2e.test.ts`、`README.md`、`docs/README.md`、`docs/progress.md`、`docs/manual-test.md`、`docs/performance-report.md`、`docs/demo-script.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | Day 11 服务级 e2e fake Prisma / fake Redis harness、异常场景测试、进度和验收文档同步、本地学习沉淀 |
+| human-reviewed decisions | 本轮不引入新测试框架，不把服务级 e2e 包装成真实浏览器或真实压测；继续复用现有 service 层边界验证业务闭环，真实 Docker 多窗口联动留作手工记录和 Day 12 压测前置 |
+| tests run | `pnpm --filter @live-auction/server test:e2e`、`pnpm --filter @live-auction/server typecheck`、`pnpm test:e2e`、`pnpm typecheck`、`pnpm test`、`pnpm lint`、`pnpm build` |
+| known issues | Day 11 新增 e2e 仍使用 fake Prisma / fake Redis store，不覆盖真实网络、真实 MySQL/Redis 连接、真实浏览器 UI 和 Socket.IO 断网重连；正式压测脚本、Redis/DB 周期对账、outbox 退避/死信仍未实现 |

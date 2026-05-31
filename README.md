@@ -6,7 +6,7 @@
 商品上架 -> 规则配置 -> 直播间展示 -> 实时出价 -> 动态排名 -> 竞拍结束 -> 成交订单
 ```
 
-当前处于 Day 10：服务端出价 API、Redis Lua 原子出价、幂等、封顶成交、防狙击延时、WebSocket 房间隔离、断线重连 snapshot、outbox 广播发布、移动端真实 REST / Socket.IO 竞拍联动、主播端创建商品 / 配置竞拍 / 启动 / 取消 / 查看订单闭环已落地；正式压测仍在后续范围。
+当前处于 Day 11：服务端出价 API、Redis Lua 原子出价、幂等、封顶成交、防狙击延时、WebSocket 房间隔离、断线重连 snapshot、outbox 广播发布、移动端真实 REST / Socket.IO 竞拍联动、主播端创建商品 / 配置竞拍 / 启动 / 取消 / 查看订单闭环已落地；Day 11 已补服务级 e2e 异常场景覆盖，正式压测仍在后续范围。
 
 ## 技术栈
 
@@ -212,12 +212,23 @@ curl http://localhost:3000/health
 - 新增 `pnpm test:e2e`，服务级覆盖 Day10 核心闭环：创建商品、创建竞拍、启动、用户端可见、封顶成交、后台订单可见。
 - 新增 `docs/day10-result.md` 记录 Day10 成果、问题和后续建议。
 
+## Day 11 完成内容
+
+- 新增 `apps/server/src/day11-auction-scenarios.e2e.test.ts`，服务级覆盖 Day 11 异常场景。
+- 覆盖无人出价到期流拍且不生成订单。
+- 覆盖一人出价到期成交、生成订单，并通过 snapshot 恢复最新状态。
+- 覆盖多人连续出价、当前价单调、最高价唯一、领先用户再次出价被拒绝和重连 snapshot 排名恢复。
+- 覆盖结束前出价触发防狙击延时并重排结束 timer。
+- 覆盖达到封顶价立即成交、只生成一个订单、后续出价返回竞拍已结束。
+- 覆盖主播取消运行中竞拍、写入 `AUCTION_CANCELLED` outbox、后续出价返回竞拍已取消。
+- 覆盖重复点击同一 `clientBidId` 返回幂等结果，不重复写入 Bid 或成功事件。
+
 ## 当前限制
 
 - 移动端真实出价依赖服务端、MySQL、Redis 已启动，且目标竞拍已经由后台启动为 `RUNNING`。
 - 移动端当前以 HTTP `POST /auctions/:auctionId/bids` 作为主出价路径，Socket.IO `placeBid` 仍作为服务端能力保留。
 - 管理端创建商品和竞拍复用两个既有接口串行调用；如果商品创建成功但竞拍创建失败，可能留下未绑定商品，后续可补一个后端组合事务接口。
-- Day10 e2e 是服务级 fake 环境测试，不等同于真实 MySQL + Redis + 浏览器全链路测试；Day11 仍需补真实环境联调记录。
+- Day10/Day11 e2e 是服务级 fake 环境测试，不等同于真实 MySQL + Redis + 浏览器全链路测试；真实浏览器多窗口和真实 Docker 端到端联调仍需手工记录。
 - 当前结束调度是 MVP 单机 timer，多实例部署需要切换到 Redis delayed queue 或 BullMQ。
 - Redis accepted 但 DB 写失败时会尝试安全回滚热状态；如果热状态已被后续出价推进，则不会强行覆盖，后续仍需要 Redis/DB 对账任务。
 - 封顶成交会让数据库 `serverSeq` 继续推进到结束和订单事件；Redis 热状态中的 seq/status 暂不反向同步，后续对账任务需要覆盖。

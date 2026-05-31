@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-当前基线：Day 10 已完成。
+当前基线：Day 11 已完成。
 
 已落地能力：
 
@@ -33,6 +33,7 @@
 - 移动端以服务端 `serverTime` 校准倒计时，以 `serverSeq` 丢弃旧事件并在跳号时重新拉取 snapshot。
 - 核心规则、状态机、出价引擎、snapshot、gateway、outbox 发布和取消 outbox 单元测试。
 - Day 10 服务级核心闭环 e2e 测试，覆盖创建商品、创建竞拍、启动、用户端可见、封顶成交和后台订单可见。
+- Day 11 服务级异常场景 e2e 测试，覆盖无人流拍、一人到期成交、多人连续出价、防狙击延时、封顶成交、运行中取消、重复点击幂等、结束/取消后拒绝出价和重连 snapshot 恢复。
 
 尚未落地能力：
 
@@ -168,13 +169,34 @@ Day 10 的主要风险和边界：
 - 管理端路由未引入 React Router，直接访问 `/admin/items/new` 等路径依赖 Vite 或部署层 fallback 到 SPA。
 - AI 卖点按钮仍未实现；不阻塞商品和竞拍主流程。
 
-## Day 11 下一步
+## Day 11 已完成
 
-进入端到端联调和异常场景补齐：
+- 新增 `apps/server/src/day11-auction-scenarios.e2e.test.ts`。
+- 服务级 e2e 覆盖无人出价到期流拍，不生成订单，只写结束事件。
+- 服务级 e2e 覆盖一人出价到期成交，生成唯一订单，并通过 snapshot 恢复最新状态。
+- 服务级 e2e 覆盖多人连续出价，断言当前价单调、最高价唯一、参与人数和用户排名正确。
+- 服务级 e2e 覆盖最后窗口内有效出价自动延时，`endTime` 延后并重排结束 timer。
+- 服务级 e2e 覆盖最高出价人再次出价返回 `BIDDER_ALREADY_LEADING` 和“当前您已是最高价”。
+- 服务级 e2e 覆盖达到封顶价立即成交、只生成一个订单、后续出价返回 `AUCTION_ALREADY_ENDED`。
+- 服务级 e2e 覆盖主播取消运行中竞拍，写入 `AUCTION_CANCELLED` outbox，后续出价返回 `AUCTION_CANCELLED`。
+- 服务级 e2e 覆盖同一 `clientBidId` 重复点击返回幂等结果，不重复写入 Bid 或成功事件。
+- 更新手工测试、性能报告、演示脚本、AI 日志和本地学习沉淀。
 
-- 用真实服务端、MySQL、Redis、管理端和移动端跑通创建商品、配置规则、启动竞拍、用户出价、成交订单闭环。
-- 补充真实双窗口联动、断线重连、到期结算、封顶成交和主播取消的手工记录或 E2E。
-- 继续补正式压测脚本和 Redis/DB 自动对账方案。
+Day 11 的主要风险和边界：
+
+- 当前新增 e2e 仍是服务级 fake Prisma / fake Redis store，不等同于真实 MySQL + Redis + 浏览器全链路。
+- 真实多窗口 Socket.IO 同步、断网重连和浏览器端竞拍结束禁用仍需要在 Docker 环境下补手工记录。
+- 正式 k6 / Artillery 压测和 Redis/DB 自动对账任务仍未落地。
+
+## Day 12 下一步
+
+进入并发压测与性能优化：
+
+- 补充 k6 或 Artillery 脚本，优先覆盖真实 HTTP + Redis + MySQL 下 30/100 并发出价。
+- 补充 100/1000 Socket.IO 连接压测或分阶段连接稳定性验证。
+- 压测后校验当前价单调、最高出价人唯一、`bidCount` 与 accepted Bid 数一致、订单不重复。
+- 将真实性能数据写入 `docs/performance-report.md`，不再只记录 fake 环境一致性测试。
+- 继续设计或实现 Redis/DB 自动对账任务。
 
 ## 文档维护规则
 
