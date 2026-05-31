@@ -357,7 +357,7 @@ Day 6 已通过服务端单元测试覆盖：
 - `BID_ACCEPTED` 只到达同一竞拍房间用户。
 - `OUTBID` 和 `LEADING` 只到达对应用户房间。
 - 重连后可以拉取包含 `serverSeq` 的最新 snapshot。
-- outbox 发布成功标记 `PUBLISHED`，发布失败标记 `FAILED` 并记录审计日志。
+- outbox 发布成功标记 `PUBLISHED`，发布失败标记 `FAILED` 并记录审计日志；Day 10 起发布器会重试 `FAILED` 事件，成功后改为 `PUBLISHED`。
 
 Day 9 移动端已实现的客户端处理：
 

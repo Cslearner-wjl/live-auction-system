@@ -17,6 +17,7 @@ import { ApiException } from "../common/api-error";
 import { PrismaService } from "../prisma/prisma.service";
 import {
   type AtomicBidInput,
+  type AtomicBidRollbackInput,
   type AtomicBidResult,
   RedisBidAtomicStore
 } from "./bid-redis.store";
@@ -37,6 +38,8 @@ class FakePrisma {
   }> = [];
   readonly orders = new Map<string, Order>();
   readonly auditLogs: Array<Record<string, unknown>> = [];
+  failNextBidCreate = false;
+  forceAuctionUpdateConflict = false;
 
   readonly auctionSession = {
     findUnique: async ({ where }: { where: { id: string } }): Promise<AuctionForBid | null> =>
@@ -61,6 +64,10 @@ class FakePrisma {
       data: Partial<AuctionSession> & { version?: { increment: number } };
     }): Promise<{ count: number }> => {
       const auction = this.auctions.get(where.id);
+      if (this.forceAuctionUpdateConflict) {
+        return { count: 0 };
+      }
+
       if (!auction) {
         return { count: 0 };
       }
@@ -113,6 +120,11 @@ class FakePrisma {
         status: PrismaBidStatus;
       };
     }): Promise<Bid> => {
+      if (this.failNextBidCreate) {
+        this.failNextBidCreate = false;
+        throw new Error("forced bid persistence failure");
+      }
+
       const existing = [...this.bids.values()].find(
         (bid) => bid.auctionId === data.auctionId && bid.clientBidId === data.clientBidId
       );
@@ -166,7 +178,29 @@ class FakePrisma {
   };
 
   async $transaction<T>(operation: (tx: this) => Promise<T>): Promise<T> {
-    return operation(this);
+    const auctions = new Map(this.auctions);
+    const bids = new Map(this.bids);
+    const events = [...this.events];
+    const orders = new Map(this.orders);
+
+    try {
+      return await operation(this);
+    } catch (error) {
+      this.auctions.clear();
+      for (const [key, value] of auctions) {
+        this.auctions.set(key, value);
+      }
+      this.bids.clear();
+      for (const [key, value] of bids) {
+        this.bids.set(key, value);
+      }
+      this.events.splice(0, this.events.length, ...events);
+      this.orders.clear();
+      for (const [key, value] of orders) {
+        this.orders.set(key, value);
+      }
+      throw error;
+    }
   }
 }
 
@@ -184,6 +218,7 @@ class FakeAtomicStore {
       acceptedClientBidIds: Set<string>;
     }
   >();
+  readonly rollbackCalls: AtomicBidRollbackInput[] = [];
 
   async placeBid(input: AtomicBidInput): Promise<AtomicBidResult> {
     const state = this.getOrCreateState(input);
@@ -222,6 +257,10 @@ class FakeAtomicStore {
 
     const previousPriceFen = state.currentPriceFen;
     const previousHighestBidderId = state.highestBidderId;
+    const previousEndTimeMs = state.endTimeMs;
+    const previousExtendedCount = state.extendedCount;
+    const previousBidCount = state.bidCount;
+    const previousUserLeaderboardAmountFen = null;
     const reachedCapPrice = input.amountFen >= input.auction.capPriceFen;
     let extended = false;
     let newEndTimeMs = state.endTimeMs;
@@ -257,6 +296,10 @@ class FakeAtomicStore {
       previousPriceFen,
       currentPriceFen: input.amountFen,
       previousHighestBidderId,
+      previousEndTimeMs,
+      previousExtendedCount,
+      previousBidCount,
+      previousUserLeaderboardAmountFen,
       highestBidderId: input.userId,
       bidCount: state.bidCount,
       serverSeq: state.serverSeq,
@@ -265,6 +308,34 @@ class FakeAtomicStore {
       newExtendedCount: state.extendedCount,
       reachedCapPrice
     };
+  }
+
+  async rollbackAcceptedBid(input: AtomicBidRollbackInput): Promise<boolean> {
+    this.rollbackCalls.push(input);
+    const state = this.states.get(input.acceptedBid.auctionId);
+
+    if (!state || state.serverSeq !== input.acceptedBid.serverSeq) {
+      return false;
+    }
+
+    if (!state.acceptedClientBidIds.has(input.clientBidId)) {
+      return false;
+    }
+
+    state.status = PrismaAuctionStatus.RUNNING;
+    state.currentPriceFen = input.acceptedBid.previousPriceFen;
+    state.highestBidderId = input.acceptedBid.previousHighestBidderId;
+    state.endTimeMs = input.acceptedBid.previousEndTimeMs;
+    state.extendedCount = input.acceptedBid.previousExtendedCount;
+    state.bidCount = input.acceptedBid.previousBidCount;
+    state.serverSeq = input.acceptedBid.serverSeq - 1;
+    state.acceptedClientBidIds.delete(input.clientBidId);
+
+    return true;
+  }
+
+  getState(auctionId: string) {
+    return this.states.get(auctionId);
   }
 
   private getOrCreateState(input: AtomicBidInput) {
@@ -537,6 +608,53 @@ describe("BidService.placeBid", () => {
   it("keeps price monotonic and bidCount consistent for 100 concurrent bids", async () => {
     await assertConcurrentBids(100);
   });
+
+  it("rolls back Redis hot state when DB persistence fails after atomic accept", async () => {
+    const { atomicStore, prisma, service } = makeBidService();
+    prisma.failNextBidCreate = true;
+
+    await assert.rejects(
+      () =>
+        service.placeBid("auction_1", "user_1", {
+          amountFen: 1000,
+          clientBidId: "db_fail"
+        }),
+      (error: unknown) => hasApiCode(error, AuctionErrorCode.BidPersistenceFailed)
+    );
+
+    const state = atomicStore.getState("auction_1");
+    assert.equal(prisma.bids.size, 0);
+    assert.equal(prisma.events.length, 0);
+    assert.equal(prisma.auditLogs.length, 1);
+    assert.equal(atomicStore.rollbackCalls.length, 1);
+    assert.equal(state?.currentPriceFen, 0);
+    assert.equal(state?.bidCount, 0);
+    assert.equal(state?.serverSeq, 0);
+    assert.equal(
+      (prisma.auditLogs[0]?.metadata as { redisRollbackSucceeded?: boolean })
+        .redisRollbackSucceeded,
+      true
+    );
+  });
+
+  it("fails persistence when the auction snapshot update is not applied", async () => {
+    const { atomicStore, prisma, service } = makeBidService();
+    prisma.forceAuctionUpdateConflict = true;
+
+    await assert.rejects(
+      () =>
+        service.placeBid("auction_1", "user_1", {
+          amountFen: 1000,
+          clientBidId: "update_conflict"
+        }),
+      (error: unknown) => hasApiCode(error, AuctionErrorCode.BidPersistenceFailed)
+    );
+
+    assert.equal(prisma.bids.size, 0);
+    assert.equal(prisma.events.length, 0);
+    assert.equal(atomicStore.rollbackCalls.length, 1);
+    assert.equal(prisma.auctions.get("auction_1")?.currentPriceFen, 0);
+  });
 });
 
 async function assertConcurrentBids(total: number): Promise<void> {
@@ -602,6 +720,7 @@ function makeBidService(
 
   return {
     prisma,
+    atomicStore,
     scheduler,
     service
   };

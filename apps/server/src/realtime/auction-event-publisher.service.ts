@@ -43,7 +43,9 @@ export class AuctionEventPublisherService implements OnModuleInit, OnModuleDestr
   async publishPendingOnce(limit = 50): Promise<{ published: number; failed: number }> {
     const events = await this.prisma.auctionEvent.findMany({
       where: {
-        outboxStatus: PrismaOutboxStatus.PENDING
+        outboxStatus: {
+          in: [PrismaOutboxStatus.PENDING, PrismaOutboxStatus.FAILED]
+        }
       },
       orderBy: {
         createdAt: "asc"
@@ -59,7 +61,9 @@ export class AuctionEventPublisherService implements OnModuleInit, OnModuleDestr
         await this.prisma.auctionEvent.updateMany({
           where: {
             id: event.id,
-            outboxStatus: PrismaOutboxStatus.PENDING
+            outboxStatus: {
+              in: [PrismaOutboxStatus.PENDING, PrismaOutboxStatus.FAILED]
+            }
           },
           data: {
             outboxStatus: PrismaOutboxStatus.PUBLISHED,

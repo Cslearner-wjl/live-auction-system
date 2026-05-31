@@ -228,7 +228,7 @@ export class BidService {
           }
         });
 
-        await tx.auctionSession.updateMany({
+        const updatedAuction = await tx.auctionSession.updateMany({
           where: {
             id: input.auction.id,
             status: PrismaAuctionStatus.RUNNING,
@@ -248,6 +248,12 @@ export class BidService {
             }
           }
         });
+
+        if (updatedAuction.count !== 1) {
+          throw new Error(
+            `Auction ${input.auction.id} was not updated for accepted bid seq ${input.atomic.serverSeq}`
+          );
+        }
 
         await tx.auctionEvent.create({
           data: {
@@ -299,7 +305,8 @@ export class BidService {
         }
       }
 
-      await this.writePersistenceFailureAudit(input, error);
+      const rollbackSucceeded = await this.rollbackAcceptedRedisBid(input);
+      await this.writePersistenceFailureAudit(input, error, rollbackSucceeded);
       throw new ApiException(
         HttpStatus.SERVICE_UNAVAILABLE,
         AuctionErrorCode.BidPersistenceFailed,
@@ -308,9 +315,29 @@ export class BidService {
           auctionId: input.auction.id,
           userId: input.userId,
           clientBidId: input.clientBidId,
-          serverSeq: input.atomic.serverSeq
+          serverSeq: input.atomic.serverSeq,
+          redisRollbackSucceeded: rollbackSucceeded
         }
       );
+    }
+  }
+
+  private async rollbackAcceptedRedisBid(input: {
+    clientBidId: string;
+    atomic: AtomicBidAccepted;
+  }): Promise<boolean> {
+    try {
+      return await this.atomicStore.rollbackAcceptedBid({
+        acceptedBid: input.atomic,
+        clientBidId: input.clientBidId
+      });
+    } catch (rollbackError: unknown) {
+      this.logger.warn(
+        `Failed to rollback Redis accepted bid ${input.atomic.auctionId}:${input.clientBidId}: ${
+          rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+        }`
+      );
+      return false;
     }
   }
 
@@ -321,7 +348,8 @@ export class BidService {
       clientBidId: string;
       atomic: AtomicBidAccepted;
     },
-    error: unknown
+    error: unknown,
+    rollbackSucceeded: boolean
   ): Promise<void> {
     try {
       await this.prisma.auditLog.create({
@@ -334,6 +362,7 @@ export class BidService {
           metadata: {
             amountFen: input.atomic.amountFen,
             serverSeq: input.atomic.serverSeq,
+            redisRollbackSucceeded: rollbackSucceeded,
             error: error instanceof Error ? error.message : String(error)
           }
         }

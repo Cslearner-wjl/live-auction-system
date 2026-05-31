@@ -191,3 +191,27 @@
 | human-reviewed decisions | 移动端本轮以 HTTP `POST /auctions/:auctionId/bids` 为主出价路径，Socket.IO 用于房间加入、snapshot 和 outbox 事件；WebSocket 事件只做 UI 提示和轻量补丁，随后以 snapshot 对齐完整状态；前端禁用按钮只做体验保护，幂等仍依赖服务端 `clientBidId`；真实联调发现 Redis Lua 初始 `server_seq=0` 会与启动事件冲突，修复为继承 DB `serverSeq` |
 | tests run | `pnpm --filter @live-auction/mobile typecheck`、`pnpm --filter @live-auction/mobile build`、`pnpm --filter @live-auction/server prisma:seed`、真实接口启动 `auction_1` 并提交 HTTP 出价、浏览器打开 `http://localhost:5174/?userId=user_2` 提交真实出价并检查 error/warning 日志为空、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm lint` |
 | known issues | 仓库仍无 `test:e2e` 脚本；真实双窗口持续联动、断网重连和乱序/跳号事件仍需后续 E2E 或手工补测；正式 k6/Artillery 压测和 Redis/DB 自动对账任务仍未完成；移动端主出价路径暂为 HTTP，Socket.IO `placeBid` 保留为服务端能力 |
+
+## 2026-05-30
+
+| 字段 | 内容 |
+| --- | --- |
+| task | Day 10 开发：PC 主播后台商品上架和竞拍规则配置表单 |
+| prompt summary | 用户要求实现 Day 10 任务，并更新 docs 相应文档 |
+| files changed | `apps/admin/src/App.tsx`、`apps/admin/src/styles.css`、`README.md`、`docs/README.md`、`docs/progress.md`、`docs/architecture.md`、`docs/api.md`、`docs/manual-test.md`、`docs/performance-report.md`、`docs/demo-script.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | 管理端“商品上架”视图、轻量 SPA path 映射、商品创建表单、竞拍规则配置表单、金额字符串转整数分、卖点解析、串行调用 `POST /admin/items` 和 `POST /admin/auctions`、Day 10 文档和学习沉淀 |
+| human-reviewed decisions | 不引入新的 UI 组件库或 React Router，沿用现有轻量 React/CSS；管理端前端只做输入辅助和金额转分，规则合法性和状态流转仍由后端兜底；Day 10 不做 AI 卖点按钮；串行调用两个既有接口会保留“商品已创建但竞拍创建失败”的边界，后续可用后端组合事务接口改进 |
+| tests run | `pnpm --filter @live-auction/admin typecheck`、`pnpm --filter @live-auction/admin build`、浏览器打开 `http://localhost:5173/admin/items/new` 检查创建页核心字段和前端 error/warning 日志、`pnpm typecheck`、`pnpm test`、`pnpm lint`、`pnpm build` |
+| known issues | Day 10 创建表单阶段未启动真实 MySQL/Redis/server 做完整页面提交闭环，需 Day 11 补测创建商品、创建竞拍、启动、移动端可见和订单生成；管理端创建商品和竞拍当前为两个接口串行调用，竞拍创建失败可能留下未绑定商品；正式压测和 Redis/DB 自动对账仍未完成 |
+
+## 2026-05-30
+
+| 字段 | 内容 |
+| --- | --- |
+| task | 根据 Day10 审查 findings 补强竞拍核心闭环 |
+| prompt summary | 用户要求根据 findings 完善系统，使其契合 10 天应该完成的任务，并生成成果文档记录完成任务和遇到的问题 |
+| files changed | `apps/server/src/bid/bid-redis.store.ts`、`apps/server/src/bid/bid.service.ts`、`apps/server/src/bid/bid.service.test.ts`、`apps/server/src/realtime/auction-event-publisher.service.ts`、`apps/server/src/realtime/auction-event-publisher.service.test.ts`、`apps/server/src/day10-core-loop.e2e.test.ts`、`apps/server/package.json`、`package.json`、`README.md`、`docs/README.md`、`docs/progress.md`、`docs/architecture.md`、`docs/consistency.md`、`docs/manual-test.md`、`docs/performance-report.md`、`docs/day10-result.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | Redis accepted 后 DB 失败安全回滚、`AuctionSession.updateMany` 命中检查、outbox `FAILED` 重试、Day10 服务级核心闭环 e2e、`test:e2e` 脚本、Day10 成果文档和文档同步 |
+| human-reviewed decisions | Redis 回滚只在 accepted 出价仍是最新 `serverSeq` 时执行，避免覆盖后续已接受出价；outbox 先复用现有 `FAILED` 状态做重试，不新增迁移字段；Day10 自动化闭环采用服务级 fake 环境，真实 MySQL/Redis/浏览器联调留给 Day11 |
+| tests run | `pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/server test`、`pnpm test:e2e`、`pnpm typecheck`、`pnpm test`、`pnpm build`、`pnpm lint` |
+| known issues | Day10 e2e 仍不是完整真实环境浏览器测试；outbox retry 还没有 retry 次数、退避和死信队列；Redis/DB 周期自动对账 worker 未实现；管理端创建商品和竞拍仍是两个接口串行调用 |

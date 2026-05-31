@@ -1,6 +1,6 @@
 # API 契约
 
-本文档定义直播竞拍系统的 REST API 契约。当前 Day 9 已实现管理端商品、竞拍规则配置、启动/取消、定时结束结算、管理端订单查询、管理端页面联调、用户端出价、用户端竞拍查询、snapshot、服务端 WebSocket/outbox 广播和移动端真实 REST / Socket.IO 联动；订单支付和 AI 卖点接口仍按目标契约记录，后续实现代码必须向本文档收敛。
+本文档定义直播竞拍系统的 REST API 契约。当前 Day 10 已实现管理端商品、竞拍规则配置、启动/取消、定时结束结算、管理端订单查询、管理端创建表单和页面联调、用户端出价、用户端竞拍查询、snapshot、服务端 WebSocket/outbox 广播和移动端真实 REST / Socket.IO 联动；订单支付和 AI 卖点接口仍按目标契约记录，后续实现代码必须向本文档收敛。
 
 ## 1. 通用约定
 
@@ -235,7 +235,7 @@ X-Demo-User-Id: admin_1
 X-Demo-Role: admin
 ```
 
-Day 7 已实现：
+当前已实现：
 
 - `POST /admin/items`
 - `GET /admin/items`
@@ -255,6 +255,8 @@ Day 7 已实现：
 - `POST /auctions/:auctionId/bids`
 
 AI 卖点接口尚未实现；订单由状态机结算流程生成，并可通过管理端订单接口查询。
+
+Day 10 管理端页面已接入上述商品和竞拍接口：`/admin/items/new` 表单会先调用 `POST /admin/items`，再用返回的 `itemId` 调用 `POST /admin/auctions` 创建 `SCHEDULED` 竞拍。该页面不新增 REST 契约；规则校验、状态流转和错误码仍以后端响应为准。
 
 ### POST /admin/items
 

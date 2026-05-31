@@ -1,6 +1,6 @@
 # Redis 与数据库一致性方案
 
-本文档约束高并发出价路径的状态一致性。Day 6 已落地 MVP 出价路径和 outbox 发布：Redis Lua 原子接受/拒绝，DB transaction 持久化 Bid、AuctionSession 快照和 AuctionEvent outbox，发布器基于已落库 outbox 定向广播。目标是避免 Redis 已接受出价但数据库没有记录、前端已收到成功但后端无法结算的情况。
+本文档约束高并发出价路径的状态一致性。Day 10 已落地 MVP 出价路径和 outbox 发布：Redis Lua 原子接受/拒绝，DB transaction 持久化 Bid、AuctionSession 快照和 AuctionEvent outbox，发布器基于已落库 outbox 定向广播，并对 Redis accepted 后 DB 失败执行安全回滚。目标是避免 Redis 已接受出价但数据库没有记录、前端已收到成功但后端无法结算的情况。
 
 ## 1. 分层策略
 
@@ -24,14 +24,14 @@
 5. Lua 返回 accepted/rejected + serverSeq + currentPriceFen + bidCount + endTime
 6. accepted 时开启 DB transaction
 7. 写 Bid 表
-8. 条件更新 AuctionSession 快照字段，条件包含 status=RUNNING 和 serverSeq 递增
+8. 条件更新 AuctionSession 快照字段，条件包含 status=RUNNING 和 serverSeq 递增；若未命中 1 条记录，进入一致性补偿
 9. 写 AuctionEvent(type=BID_ACCEPTED, outboxStatus=PENDING)
 10. transaction 提交
 11. 如达到 capPriceFen，调用 AuctionStateMachineService.settleSoldAuction 立即成交
 12. 如触发防狙击延时，调用 AuctionSchedulerService.scheduleEndTimer 重排 timer
 ```
 
-Day 6 已实现：`AuctionEventPublisherService` 读取 `AuctionEvent(outboxStatus=PENDING)` 后广播，并在成功后标记 `PUBLISHED`；发布失败时标记 `FAILED` 并写 `AuditLog(action=AUCTION_EVENT_PUBLISH_FAILED)`。
+Day 10 已实现：`AuctionEventPublisherService` 读取 `AuctionEvent(outboxStatus=PENDING|FAILED)` 后广播，并在成功后标记 `PUBLISHED`；发布失败时标记 `FAILED` 并写 `AuditLog(action=AUCTION_EVENT_PUBLISH_FAILED)`。
 
 Lua 返回结构：
 
@@ -43,6 +43,10 @@ Lua 返回结构：
   "previousPriceFen": 85000,
   "currentPriceFen": 90000,
   "previousHighestBidderId": "user_2",
+  "previousEndTimeMs": 1780308000000,
+  "previousExtendedCount": 0,
+  "previousBidCount": 13,
+  "previousUserLeaderboardAmountFen": null,
   "highestBidderId": "user_1",
   "bidCount": 14,
   "serverSeq": 18,
@@ -95,9 +99,12 @@ Redis Lua accepted -> 直接广播 BID_ACCEPTED -> DB 写失败 -> throw
 ### 4.1 MVP 策略（当前实现）
 
 - Redis accepted 后进入 DB transaction。
+- DB transaction 内必须确认 `AuctionSession.updateMany` 命中 1 条记录，避免 Bid / outbox 已写但竞拍快照未推进。
+- DB 写失败时，如果该 Redis accepted 仍是最新 `serverSeq`，调用 Redis 回滚脚本恢复当前价、最高出价人、结束时间、延时次数、出价次数、排行榜和 `clientBidId` 热幂等键。
+- 如果 Redis 状态已经被后续出价推进，回滚脚本返回失败，不强行覆盖后续热状态。
 - DB 写失败时，返回 `503 BID_PERSISTENCE_FAILED`，不广播成功事件。
-- 记录 `AuditLog(action=DB_WRITE_FAILED_AFTER_REDIS_ACCEPTED)`，包含 `auctionId`、`userId`、`clientBidId`、`serverSeq`。
-- 后续对账流程根据 Redis 热状态和 `auction_events` 修复；当前仅记录审计日志，尚未实现自动对账 worker。
+- 记录 `AuditLog(action=DB_WRITE_FAILED_AFTER_REDIS_ACCEPTED)`，包含 `auctionId`、`userId`、`clientBidId`、`serverSeq` 和 `redisRollbackSucceeded`。
+- 后续对账流程根据 Redis 热状态和 `auction_events` 修复；当前已具备单次失败安全回滚，尚未实现周期自动对账 worker。
 - 客户端收到失败后重新拉 snapshot，而不是假设出价成功。
 
 ### 4.2 进阶策略
@@ -136,7 +143,7 @@ Day 6 新增边界：封顶成交后状态机还会写 `AUCTION_ENDED` 和 `ORDE
 
 - `BID_ACCEPTED`、`OUTBID`、`LEADING`、`AUCTION_EXTENDED` 使用同一个 `serverSeq` 或按持久化事件顺序递增。
 - 广播 payload 以 `AuctionEvent.payload` 为基础，由 `AuctionEventPublisherService` 统一补充 `eventId`、房间和用户脱敏信息，避免多个服务临时拼装不同版本。
-- 广播失败时保留 `outboxStatus=FAILED`，后续可重试。
+- 广播失败时保留 `outboxStatus=FAILED`，发布器后续轮询会再次扫描 `FAILED` 事件并重试，成功后标记 `PUBLISHED`。
 - 客户端发现 `serverSeq` 跳号后拉 snapshot。
 
 ## 7. 对账任务

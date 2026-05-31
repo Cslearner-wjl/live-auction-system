@@ -2,12 +2,12 @@
 
 本文档用于记录难以完全自动化的演示级流程。每次完成相关功能后，在结果栏记录日期、环境和结论。
 
-当前基线：Day 9 已完成。出价 API、Redis Lua、封顶成交、防狙击延时、Socket.IO 房间隔离、outbox 广播、重连 snapshot、管理端工作台和移动端真实 REST / Socket.IO 页面已有自动化、类型检查或构建检查；多窗口真实浏览器联动和正式压测仍需后续补测。
+当前基线：Day 10 已完成。出价 API、Redis Lua、封顶成交、防狙击延时、Socket.IO 房间隔离、outbox 广播、重连 snapshot、管理端创建商品 / 竞拍表单、管理端工作台和移动端真实 REST / Socket.IO 页面已有自动化、类型检查或构建检查；Day 10 服务级核心闭环已有 `pnpm test:e2e` 覆盖，真实 MySQL/Redis/浏览器闭环、多窗口真实联动和正式压测仍需后续补测。
 
 | 场景 | 前置条件 | 操作 | 预期结果 | 结果 |
 | --- | --- | --- | --- | --- |
-| 后台创建商品 | 已启动服务端，数据库已 seed `admin_1` | 调用 `POST /admin/items`，带 `X-Demo-Role: admin` | 返回 `201` 和商品 DTO，`sellingPoints` 被规范化保存 | 待测 |
-| 后台创建 0 元起拍竞拍 | 已有 `room_1` 和商品 | 调用 `POST /admin/auctions`，`startPriceFen: 0`、`incrementFen > 0`、`capPriceFen > 0` | 返回 `SCHEDULED` 竞拍，`currentPriceFen` 为 `0` | 单元测试已覆盖核心规则，接口待测 |
+| 后台创建商品 | 已启动服务端，数据库已 seed `admin_1` | 在管理端“商品上架”表单填写商品名称、图片 URL、介绍和卖点，提交 | 返回 `201` 和商品 DTO，`sellingPoints` 被规范化保存；页面继续创建竞拍 | 2026-05-30：管理端页面已接入表单，`apps/admin` typecheck/build 通过；浏览器打开 `/admin/items/new` 表单渲染且无前端 error/warning；`pnpm test:e2e` 服务级闭环覆盖商品创建；真实接口闭环待 Day 11 补测 |
+| 后台创建 0 元起拍竞拍 | 已有 `room_1`，管理端表单中起拍价填 `0` | 在同一表单填写固定加价、时长、封顶价、防狙击窗口、延时时长和最大延时次数，提交 | 返回 `SCHEDULED` 竞拍，`currentPriceFen` 为 `0`，列表刷新后可启动 | 2026-05-30：页面转换整数分并调用 `POST /admin/auctions`，浏览器确认 0 元起拍和延时字段可见；`pnpm test:e2e` 服务级闭环覆盖竞拍创建、启动、用户端可见和成交订单 |
 | 后台拒绝非法规则 | 已启动服务端 | 创建竞拍时传 `incrementFen: 0` 或 `capPriceFen <= startPriceFen` | 返回 `400 VALIDATION_FAILED`，错误字段稳定 | 单元测试已覆盖核心规则，接口待测 |
 | 开拍后禁止改规则 | 已创建并启动竞拍 | 调用 `PATCH /admin/auctions/:id/rules` | 返回 `409 RULE_CANNOT_BE_CHANGED_AFTER_START` | 单元测试已覆盖核心规则，接口待测 |
 | 后台取消竞拍 | 竞拍为 `SCHEDULED` 或 `RUNNING` | 调用 `POST /admin/auctions/:id/cancel` 并填写原因 | 状态变为 `CANCELLED`，返回取消原因和时间，写入 `AUCTION_CANCELLED` outbox | 2026-05-27：状态机单元测试覆盖取消 outbox；真实接口待 Docker 环境补测 |
@@ -101,6 +101,24 @@
 - 打开 `http://localhost:5174/?userId=user_1` 和 `http://localhost:5174/?userId=user_2`，交替出价，验证当前价、排行榜、领先 / 被超越提示同步。
 - 手动断开移动端网络或刷新页面，验证重连后 snapshot 恢复最新价格、倒计时和我的排名。
 - 等待到期或冲击封顶价，验证竞拍结束后移动端禁用出价并展示成交 / 流拍状态。
+
+## Day 10 管理端创建表单检查
+
+已覆盖：
+
+- `apps/admin` 类型检查覆盖创建表单状态、金额字符串转整数分、卖点解析和 API DTO 类型。
+- `apps/admin` production build 产物生成通过。
+- 浏览器打开 `http://localhost:5173/admin/items/new`，确认创建页核心字段渲染且前端 error/warning 日志为空。
+- `pnpm test:e2e` 覆盖创建商品、创建 0 元起拍竞拍、启动竞拍、房间竞拍列表可见、封顶成交、后台订单列表可见。
+- 管理端新增“商品上架” tab，路径 `/admin/items` 和 `/admin/items/new` 会进入创建页。
+- 创建页覆盖商品名称、商品图片 URL、商品介绍、卖点标签、直播间 ID、起拍价、固定加价、竞拍时长、封顶价、防狙击窗口、延时时长和最大延时次数。
+- 表单提交前会做轻量输入校验；后端仍负责最终规则校验和状态机兜底。
+
+待补真实环境检查：
+
+- 启动 MySQL、Redis、server 和 admin 后，通过页面创建新商品和 0 元起拍竞拍，确认列表出现 `SCHEDULED` 竞拍。
+- 点击新竞拍“启动”，再打开移动端确认 `GET /rooms/:roomId/auctions` 能看到启动后的竞拍。
+- 对新竞拍完成一次真实出价和结算，确认后台订单列表出现成交订单。
 
 ## 记录格式
 

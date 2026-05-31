@@ -27,6 +27,10 @@ export interface AtomicBidAccepted {
   previousPriceFen: number;
   currentPriceFen: number;
   previousHighestBidderId: string | null;
+  previousEndTimeMs: number;
+  previousExtendedCount: number;
+  previousBidCount: number;
+  previousUserLeaderboardAmountFen: number | null;
   highestBidderId: string;
   bidCount: number;
   serverSeq: number;
@@ -47,6 +51,11 @@ export interface AtomicBidRejected {
 }
 
 export type AtomicBidResult = AtomicBidAccepted | AtomicBidRejected;
+
+export interface AtomicBidRollbackInput {
+  acceptedBid: AtomicBidAccepted;
+  clientBidId: string;
+}
 
 export function auctionBidRedisKeys(auctionId: string, clientBidId: string) {
   const prefix = `auction:${auctionId}`;
@@ -107,6 +116,37 @@ export class RedisBidAtomicStore {
 
     return parseRedisScriptResult(result);
   }
+
+  async rollbackAcceptedBid(input: AtomicBidRollbackInput): Promise<boolean> {
+    const keys = auctionBidRedisKeys(input.acceptedBid.auctionId, input.clientBidId);
+    const result = await this.redis.eval(ROLLBACK_ACCEPTED_BID_SCRIPT, {
+      keys: [
+        keys.stateKey,
+        keys.currentPriceKey,
+        keys.highestBidderKey,
+        keys.endTimeKey,
+        keys.bidCountKey,
+        keys.leaderboardKey,
+        keys.clientBidKey
+      ],
+      arguments: [
+        input.acceptedBid.auctionId,
+        input.acceptedBid.highestBidderId,
+        String(input.acceptedBid.serverSeq),
+        String(input.acceptedBid.previousPriceFen),
+        input.acceptedBid.previousHighestBidderId ?? "",
+        String(input.acceptedBid.previousEndTimeMs),
+        String(input.acceptedBid.previousExtendedCount),
+        String(input.acceptedBid.previousBidCount),
+        input.acceptedBid.previousUserLeaderboardAmountFen === null
+          ? ""
+          : String(input.acceptedBid.previousUserLeaderboardAmountFen),
+        String(this.hotKeyTtlSeconds)
+      ]
+    });
+
+    return result === "1" || result === 1;
+  }
 }
 
 function parseRedisScriptResult(result: RedisEvalResult): AtomicBidResult {
@@ -136,6 +176,11 @@ function parseRedisScriptResult(result: RedisEvalResult): AtomicBidResult {
     previousPriceFen: readNumber(payload.previousPriceFen),
     currentPriceFen: readNumber(payload.currentPriceFen),
     previousHighestBidderId: readOptionalNullableString(payload.previousHighestBidderId) ?? null,
+    previousEndTimeMs: readNumber(payload.previousEndTimeMs),
+    previousExtendedCount: readNumber(payload.previousExtendedCount),
+    previousBidCount: readNumber(payload.previousBidCount),
+    previousUserLeaderboardAmountFen:
+      readOptionalNumber(payload.previousUserLeaderboardAmountFen) ?? null,
     highestBidderId: readString(payload.highestBidderId),
     bidCount: readNumber(payload.bidCount),
     serverSeq: readNumber(payload.serverSeq),
@@ -255,6 +300,7 @@ local highestBidderId = redis.call("GET", highestBidderKey) or ""
 local endTimeMs = tonumber(redis.call("GET", endTimeKey) or dbEndTimeMs)
 local bidCount = tonumber(redis.call("GET", bidCountKey) or dbBidCount)
 local extendedCount = tonumber(redis.call("HGET", stateKey, "extended_count") or dbExtendedCount)
+local previousUserLeaderboardAmountFen = redis.call("ZSCORE", leaderboardKey, userId)
 
 if dbStatus ~= "RUNNING" then
   redis.call("HSET", stateKey, "status", dbStatus)
@@ -298,6 +344,9 @@ bidCount = tonumber(redis.call("INCR", bidCountKey))
 
 local previousPriceFen = currentPriceFen
 local previousHighestBidderId = highestBidderId
+local previousEndTimeMs = endTimeMs
+local previousExtendedCount = extendedCount
+local previousBidCount = bidCount
 local reachedCapPrice = amountFen >= capPriceFen
 local extended = false
 local newEndTimeMs = endTimeMs
@@ -344,6 +393,10 @@ return cjson.encode({
   previousPriceFen = previousPriceFen,
   currentPriceFen = amountFen,
   previousHighestBidderId = previousHighestBidderId,
+  previousEndTimeMs = previousEndTimeMs,
+  previousExtendedCount = previousExtendedCount,
+  previousBidCount = previousBidCount,
+  previousUserLeaderboardAmountFen = previousUserLeaderboardAmountFen,
   highestBidderId = userId,
   bidCount = bidCount,
   serverSeq = serverSeq,
@@ -352,4 +405,68 @@ return cjson.encode({
   newExtendedCount = extendedCount,
   reachedCapPrice = reachedCapPrice
 })
+`;
+
+const ROLLBACK_ACCEPTED_BID_SCRIPT = `
+local stateKey = KEYS[1]
+local currentPriceKey = KEYS[2]
+local highestBidderKey = KEYS[3]
+local endTimeKey = KEYS[4]
+local bidCountKey = KEYS[5]
+local leaderboardKey = KEYS[6]
+local clientBidKey = KEYS[7]
+
+local auctionId = ARGV[1]
+local acceptedUserId = ARGV[2]
+local acceptedServerSeq = tonumber(ARGV[3])
+local previousPriceFen = tonumber(ARGV[4])
+local previousHighestBidderId = ARGV[5]
+local previousEndTimeMs = tonumber(ARGV[6])
+local previousExtendedCount = tonumber(ARGV[7])
+local previousBidCount = tonumber(ARGV[8])
+local previousUserLeaderboardAmountFen = ARGV[9]
+local ttlSeconds = tonumber(ARGV[10])
+
+local function expireKey(key)
+  if ttlSeconds and ttlSeconds > 0 then
+    redis.call("EXPIRE", key, ttlSeconds)
+  end
+end
+
+local currentServerSeq = tonumber(redis.call("HGET", stateKey, "server_seq") or "-1")
+if currentServerSeq ~= acceptedServerSeq then
+  return "0"
+end
+
+if redis.call("EXISTS", clientBidKey) ~= 1 then
+  return "0"
+end
+
+redis.call("HSET", stateKey, "status", "RUNNING", "server_seq", tostring(acceptedServerSeq - 1), "extended_count", tostring(previousExtendedCount))
+redis.call("SET", currentPriceKey, tostring(previousPriceFen))
+redis.call("SET", endTimeKey, tostring(previousEndTimeMs))
+redis.call("SET", bidCountKey, tostring(previousBidCount))
+
+if previousHighestBidderId and previousHighestBidderId ~= "" then
+  redis.call("SET", highestBidderKey, previousHighestBidderId)
+else
+  redis.call("DEL", highestBidderKey)
+end
+
+if previousUserLeaderboardAmountFen and previousUserLeaderboardAmountFen ~= "" then
+  redis.call("ZADD", leaderboardKey, tonumber(previousUserLeaderboardAmountFen), acceptedUserId)
+else
+  redis.call("ZREM", leaderboardKey, acceptedUserId)
+end
+
+redis.call("DEL", clientBidKey)
+
+expireKey(stateKey)
+expireKey(currentPriceKey)
+expireKey(highestBidderKey)
+expireKey(endTimeKey)
+expireKey(bidCountKey)
+expireKey(leaderboardKey)
+
+return "1"
 `;

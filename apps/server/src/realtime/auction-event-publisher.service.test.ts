@@ -78,26 +78,27 @@ class FakePrisma {
 
   readonly auctionEvent = {
     findMany: async ({
+      where,
       take
     }: {
-      where: { outboxStatus: PrismaOutboxStatus };
+      where: { outboxStatus: PrismaOutboxStatus | { in: PrismaOutboxStatus[] } };
       orderBy: { createdAt: "asc" };
       take: number;
     }) =>
       [...this.events.values()]
-        .filter((event) => event.outboxStatus === PrismaOutboxStatus.PENDING)
+        .filter((event) => matchesOutboxStatus(event.outboxStatus, where.outboxStatus))
         .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())
         .slice(0, take),
     updateMany: async ({
       where,
       data
     }: {
-      where: { id: string; outboxStatus: PrismaOutboxStatus };
+      where: { id: string; outboxStatus: PrismaOutboxStatus | { in: PrismaOutboxStatus[] } };
       data: { outboxStatus: PrismaOutboxStatus; publishedAt?: Date };
     }) => {
       const event = this.events.get(where.id);
 
-      if (!event || event.outboxStatus !== where.outboxStatus) {
+      if (!event || !matchesOutboxStatus(event.outboxStatus, where.outboxStatus)) {
         return { count: 0 };
       }
 
@@ -221,7 +222,41 @@ describe("AuctionEventPublisherService", () => {
     assert.equal(prisma.auditLogs.length, 1);
     assert.equal(prisma.auditLogs[0]?.action, "AUCTION_EVENT_PUBLISH_FAILED");
   });
+
+  it("retries failed outbox events and marks them published after a later successful broadcast", async () => {
+    const prisma = new FakePrisma();
+    const gateway = new FakeGateway();
+    const event = makeEvent(PrismaAuctionEventType.ORDER_CREATED, {
+      orderId: "order_1",
+      buyerId: "user_new",
+      amountFen: 10000
+    });
+    prisma.events.set(event.id, {
+      ...event,
+      outboxStatus: PrismaOutboxStatus.FAILED
+    });
+    const publisher = new AuctionEventPublisherService(
+      prisma as unknown as PrismaService,
+      gateway as unknown as AuctionRealtimeGateway
+    );
+
+    const result = await publisher.publishPendingOnce();
+
+    assert.deepEqual(result, { published: 1, failed: 0 });
+    assert.equal(prisma.events.get(event.id)?.outboxStatus, PrismaOutboxStatus.PUBLISHED);
+    assert.deepEqual(
+      gateway.emissions.map((item) => [item.room, item.event]),
+      [[userRoomName("user_new"), AuctionWebSocketEvent.OrderCreated]]
+    );
+  });
 });
+
+function matchesOutboxStatus(
+  actual: PrismaOutboxStatus,
+  expected: PrismaOutboxStatus | { in: PrismaOutboxStatus[] }
+): boolean {
+  return typeof expected === "string" ? actual === expected : expected.in.includes(actual);
+}
 
 function makeEvent(
   type: PrismaAuctionEventType,

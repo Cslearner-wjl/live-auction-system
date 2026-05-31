@@ -102,24 +102,26 @@ flowchart LR
   -> 广播 AUCTION_ENDED / ORDER_CREATED
 ```
 
-Day 9 当前实现状态：
+Day 10 当前实现状态：
 
 - `AuctionStateMachineService.finishAuction` 已实现 DB 事务内结算。
 - 有 `highestBidderId` 时流转 `ENDED_SOLD` 并创建唯一订单；无最高出价人时流转 `ENDED_UNSOLD`。
 - `AuctionSchedulerService` 已实现单机 timer 和服务启动后的 `RUNNING` 竞拍恢复扫描。
 - `BidService` 已实现 `POST /auctions/:auctionId/bids`，Redis 热状态在首次出价时按 DB 快照惰性初始化。
 - 出价成功后已写 `Bid`、更新 `AuctionSession`，并写 `AuctionEvent(BID_ACCEPTED, outboxStatus=PENDING)`。
-- Redis accepted 但 DB 写失败时记录 `AuditLog(DB_WRITE_FAILED_AFTER_REDIS_ACCEPTED)` 并返回 `BID_PERSISTENCE_FAILED`。
+- Redis accepted 但 DB 写失败时会尝试按最新 `serverSeq` 安全回滚 Redis 热状态，记录 `AuditLog(DB_WRITE_FAILED_AFTER_REDIS_ACCEPTED)` 并返回 `BID_PERSISTENCE_FAILED`。
 - `AuctionSnapshotService` 已提供房间竞拍列表、竞拍详情和重连 snapshot。
 - `AuctionRealtimeGateway` 已支持 `user:{userId}`、`room:{roomId}`、`auction:{auctionId}` 房间加入、snapshot 请求、Socket.IO 出价和心跳。
-- `AuctionEventPublisherService` 已从 DB outbox 发布 WebSocket 事件，并在成功后标记 `PUBLISHED`，失败时标记 `FAILED` 并写审计日志。
+- `AuctionEventPublisherService` 已从 DB outbox 发布 WebSocket 事件，并在成功后标记 `PUBLISHED`，失败时标记 `FAILED` 并写审计日志；后续轮询会重试 `FAILED` 事件。
 - Redis/DB 自动对账仍未落地，后续实现必须继续向上述目标数据流收敛。
 
-Day 7 管理端实现状态：
+Day 10 管理端实现状态：
 
-- `apps/admin` 已接入管理端 API，提供竞拍列表、状态筛选、启动 / 取消操作和订单列表。
-- 管理端页面只消费 API 状态，不实现竞拍状态机；启动和取消合法性仍由后端状态机兜底。
+- `apps/admin` 已接入管理端 API，提供商品上架、竞拍规则配置、竞拍列表、状态筛选、启动 / 取消操作和订单列表。
+- 管理端创建页通过 `POST /admin/items` 创建商品，再通过 `POST /admin/auctions` 创建 `SCHEDULED` 竞拍；成功后刷新竞拍列表。
+- 管理端页面只消费 API 状态，不实现竞拍状态机；规则合法性、启动和取消合法性仍由后端校验和状态机兜底。
 - 管理端 API DTO 已补充商品标签、商品图、买家脱敏名和竞拍状态等展示字段。
+- 管理端路由采用轻量 SPA path 映射：`/admin/auctions`、`/admin/items/new`、`/admin/orders`；生产部署需要 fallback 到同一个前端入口。
 
 Day 9 移动端实现状态：
 

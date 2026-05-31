@@ -6,7 +6,7 @@
 商品上架 -> 规则配置 -> 直播间展示 -> 实时出价 -> 动态排名 -> 竞拍结束 -> 成交订单
 ```
 
-当前处于 Day 9：服务端出价 API、Redis Lua 原子出价、幂等、封顶成交、防狙击延时、WebSocket 房间隔离、断线重连 snapshot、outbox 广播发布、主播端管理后台联调和移动端真实 REST / Socket.IO 竞拍联动已落地；正式压测仍在后续范围。
+当前处于 Day 10：服务端出价 API、Redis Lua 原子出价、幂等、封顶成交、防狙击延时、WebSocket 房间隔离、断线重连 snapshot、outbox 广播发布、移动端真实 REST / Socket.IO 竞拍联动、主播端创建商品 / 配置竞拍 / 启动 / 取消 / 查看订单闭环已落地；正式压测仍在后续范围。
 
 ## 技术栈
 
@@ -101,6 +101,7 @@ pnpm dev:mobile
 pnpm typecheck
 pnpm build
 pnpm test
+pnpm test:e2e
 ```
 
 服务端健康检查：
@@ -164,7 +165,7 @@ curl http://localhost:3000/health
 - WebSocket 连接使用 demo 身份加入 `user:{userId}`，支持 `joinRoom`、`joinAuction`、`leaveAuction`、`requestSnapshot`、`placeBid` 和 `PING`。
 - 新增 `GET /rooms/:roomId/auctions`、`GET /auctions/:auctionId`、`GET /auctions/:auctionId/snapshot`，snapshot 包含 `roomId`、`serverTime`、`serverSeq`、排行榜和当前用户排名。
 - 状态机在启动、取消、成交/流拍和订单创建时写入 `AuctionEvent` outbox。
-- `AuctionEventPublisherService` 轮询 `PENDING` 事件，按 `room:{roomId}`、`auction:{auctionId}`、`user:{userId}` 定向广播，并在成功后标记 `PUBLISHED`，失败时标记 `FAILED` 并写审计日志。
+- `AuctionEventPublisherService` 轮询 `PENDING` / `FAILED` 事件，按 `room:{roomId}`、`auction:{auctionId}`、`user:{userId}` 定向广播或重试，并在成功后标记 `PUBLISHED`，失败时标记 `FAILED` 并写审计日志。
 - `BID_ACCEPTED` outbox 会拆分广播 `BID_ACCEPTED`、`LEADING`、`OUTBID`，触发延时时同时广播 `AUCTION_EXTENDED`。
 - 新增服务端单元测试，覆盖房间加入、重连 snapshot、outbox 房间隔离、私有提醒和发布失败留痕。
 
@@ -198,12 +199,27 @@ curl http://localhost:3000/health
 - 保留 `?roomId=room_1&userId=user_2` 这类查询参数，便于多窗口模拟不同用户联调。
 - 修复 demo seed 和 Redis 出价序列初始化问题，`auction_1` 可以重复 seed、启动并完成真实出价联调。
 
+## Day 10 完成内容
+
+- 管理端新增“商品上架”视图，支持直接访问 `/admin/items` 和 `/admin/items/new`。
+- 商品表单支持商品名称、图片 URL、介绍和卖点标签。
+- 竞拍规则表单支持直播间 ID、0 元起拍、固定加价、竞拍时长、封顶价、防狙击窗口、延时时长和最大延时次数。
+- 管理端提交时先调用 `POST /admin/items` 创建商品，再调用 `POST /admin/auctions` 创建 `SCHEDULED` 竞拍，成功后回到竞拍列表。
+- 前端金额按元输入，提交前转换为整数分；规则合法性继续由后端校验和状态机兜底。
+- 管理端提供轻量 SPA path 映射：`/admin/auctions`、`/admin/items/new`、`/admin/orders`。
+- 出价落库失败时会尝试 Redis 热状态安全回滚，并记录补偿审计。
+- outbox `FAILED` 事件后续会被发布器重试，临时广播失败可恢复。
+- 新增 `pnpm test:e2e`，服务级覆盖 Day10 核心闭环：创建商品、创建竞拍、启动、用户端可见、封顶成交、后台订单可见。
+- 新增 `docs/day10-result.md` 记录 Day10 成果、问题和后续建议。
+
 ## 当前限制
 
 - 移动端真实出价依赖服务端、MySQL、Redis 已启动，且目标竞拍已经由后台启动为 `RUNNING`。
 - 移动端当前以 HTTP `POST /auctions/:auctionId/bids` 作为主出价路径，Socket.IO `placeBid` 仍作为服务端能力保留。
-- 管理端创建商品和竞拍表单仍在 Day 10 范围，当前后台优先覆盖列表、状态筛选、启动 / 取消和订单查看。
+- 管理端创建商品和竞拍复用两个既有接口串行调用；如果商品创建成功但竞拍创建失败，可能留下未绑定商品，后续可补一个后端组合事务接口。
+- Day10 e2e 是服务级 fake 环境测试，不等同于真实 MySQL + Redis + 浏览器全链路测试；Day11 仍需补真实环境联调记录。
 - 当前结束调度是 MVP 单机 timer，多实例部署需要切换到 Redis delayed queue 或 BullMQ。
-- Redis accepted 但 DB 写失败时暂按 MVP 补偿策略处理：不广播成功，记录审计日志，后续需要实现 Redis/DB 对账任务。
+- Redis accepted 但 DB 写失败时会尝试安全回滚热状态；如果热状态已被后续出价推进，则不会强行覆盖，后续仍需要 Redis/DB 对账任务。
 - 封顶成交会让数据库 `serverSeq` 继续推进到结束和订单事件；Redis 热状态中的 seq/status 暂不反向同步，后续对账任务需要覆盖。
+- outbox retry 目前没有 retry 次数、退避和死信队列，坏 payload 会重复失败并写审计。
 - 真实性能压测脚本和报告仍需补充；当前只有服务端单元级并发测试。

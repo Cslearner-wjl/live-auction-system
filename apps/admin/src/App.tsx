@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { AuctionStatus, OrderStatus } from "@live-auction/shared";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
@@ -7,7 +7,7 @@ const ADMIN_HEADERS = {
   "X-Demo-Role": "admin"
 };
 
-type ViewKey = "auctions" | "orders";
+type ViewKey = "auctions" | "create" | "orders";
 type LoadState = "idle" | "loading" | "ready" | "error";
 
 interface PageMeta {
@@ -17,6 +17,43 @@ interface PageMeta {
   totalPages: number;
 }
 
+interface ItemDto {
+  id: string;
+  name: string;
+  imageUrl: string;
+  description: string;
+  sellingPoints: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface CreateAuctionForm {
+  roomId: string;
+  name: string;
+  imageUrl: string;
+  description: string;
+  sellingPointsText: string;
+  startPriceYuan: string;
+  incrementYuan: string;
+  durationSeconds: string;
+  capPriceYuan: string;
+  antiSnipingWindowSeconds: string;
+  extensionSeconds: string;
+  maxExtensionCount: string;
+}
+
+interface CreateAuctionPayload {
+  roomId: string;
+  itemId: string;
+  startPriceFen: number;
+  incrementFen: number;
+  durationSeconds: number;
+  capPriceFen: number;
+  antiSnipingWindowSeconds: number;
+  extensionSeconds: number;
+  maxExtensionCount: number;
+}
+
 interface AuctionListItem {
   id: string;
   roomId: string;
@@ -24,6 +61,23 @@ interface AuctionListItem {
   itemName: string;
   itemImageUrl: string;
   itemSellingPoints?: string[];
+  status: AuctionStatus;
+  startPriceFen: number;
+  currentPriceFen: number;
+  incrementFen: number;
+  capPriceFen: number;
+  startTime: string | null;
+  endTime: string | null;
+  extendedCount: number;
+  highestBidderId: string | null;
+  bidCount: number;
+  version: number;
+}
+
+interface AuctionDto {
+  id: string;
+  roomId: string;
+  itemId: string;
   status: AuctionStatus;
   startPriceFen: number;
   currentPriceFen: number;
@@ -68,6 +122,27 @@ interface ApiErrorPayload {
   details?: Record<string, unknown>;
 }
 
+const initialCreateAuctionForm: CreateAuctionForm = {
+  roomId: "room_1",
+  name: "",
+  imageUrl: "",
+  description: "",
+  sellingPointsText: "",
+  startPriceYuan: "0",
+  incrementYuan: "10",
+  durationSeconds: "300",
+  capPriceYuan: "1000",
+  antiSnipingWindowSeconds: "10",
+  extensionSeconds: "15",
+  maxExtensionCount: "3"
+};
+
+const viewPaths: Record<ViewKey, string> = {
+  auctions: "/admin/auctions",
+  create: "/admin/items/new",
+  orders: "/admin/orders"
+};
+
 const auctionStatusOptions: Array<{ label: string; value: AuctionStatus | "ALL" }> = [
   { label: "全部", value: "ALL" },
   { label: "未开始", value: AuctionStatus.Scheduled },
@@ -93,18 +168,27 @@ const orderStatusLabels: Record<OrderStatus, string> = {
 };
 
 export function App() {
-  const [view, setView] = useState<ViewKey>("auctions");
+  const [view, setView] = useState<ViewKey>(() => viewFromPath(window.location.pathname));
   const [auctionStatus, setAuctionStatus] = useState<AuctionStatus | "ALL">("ALL");
   const [auctions, setAuctions] = useState<AuctionListResponse | null>(null);
   const [orders, setOrders] = useState<OrderListResponse | null>(null);
   const [loadState, setLoadState] = useState<LoadState>("idle");
   const [message, setMessage] = useState<string | null>(null);
+  const [messageTone, setMessageTone] = useState<"info" | "error">("info");
   const [now, setNow] = useState(() => Date.now());
   const [busyAuctionId, setBusyAuctionId] = useState<string | null>(null);
+  const [createForm, setCreateForm] = useState<CreateAuctionForm>(initialCreateAuctionForm);
+  const [createSubmitting, setCreateSubmitting] = useState(false);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => setView(viewFromPath(window.location.pathname));
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
   useEffect(() => {
@@ -117,13 +201,29 @@ export function App() {
   );
   const orderTotal = orders?.page.total ?? 0;
 
-  async function refreshDashboard() {
+  function switchView(nextView: ViewKey) {
+    setView(nextView);
+    window.history.pushState(null, "", viewPaths[nextView]);
+  }
+
+  function updateCreateForm<Field extends keyof CreateAuctionForm>(
+    field: Field,
+    value: CreateAuctionForm[Field]
+  ) {
+    setCreateForm((current) => ({
+      ...current,
+      [field]: value
+    }));
+  }
+
+  async function refreshDashboard(statusOverride: AuctionStatus | "ALL" = auctionStatus) {
     setLoadState("loading");
     setMessage(null);
+    setMessageTone("info");
 
     try {
       const [auctionResult, orderResult] = await Promise.all([
-        fetchAuctions(auctionStatus),
+        fetchAuctions(statusOverride),
         fetchOrders()
       ]);
       setAuctions(auctionResult);
@@ -131,7 +231,53 @@ export function App() {
       setLoadState("ready");
     } catch (error: unknown) {
       setLoadState("error");
+      setMessageTone("error");
       setMessage(toErrorMessage(error));
+    }
+  }
+
+  async function submitCreateAuction(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCreateSubmitting(true);
+    setMessage(null);
+    setMessageTone("info");
+
+    let createdItem: ItemDto | null = null;
+
+    try {
+      const itemPayload = toCreateItemPayload(createForm);
+      const auctionPayload = toCreateAuctionPayload(createForm, "__pending_item_id__");
+
+      createdItem = await requestJson<ItemDto>("/admin/items", {
+        method: "POST",
+        body: JSON.stringify(itemPayload)
+      });
+
+      const auction = await requestJson<AuctionDto>("/admin/auctions", {
+        method: "POST",
+        body: JSON.stringify({
+          ...auctionPayload,
+          itemId: createdItem.id
+        })
+      });
+
+      setCreateForm({
+        ...initialCreateAuctionForm,
+        roomId: createForm.roomId
+      });
+      setAuctionStatus("ALL");
+      await refreshDashboard("ALL");
+      switchView("auctions");
+      setMessageTone("info");
+      setMessage(`已创建商品「${createdItem.name}」，竞拍 ${auction.id} 已进入未开始列表。`);
+    } catch (error: unknown) {
+      const suffix = createdItem
+        ? " 商品已创建但竞拍未创建，请检查直播间和规则后重新提交。"
+        : "";
+      setMessageTone("error");
+      setMessage(`${toErrorMessage(error)}${suffix}`);
+    } finally {
+      setCreateSubmitting(false);
     }
   }
 
@@ -159,12 +305,15 @@ export function App() {
   async function mutateAuction(auctionId: string, operation: () => Promise<unknown>) {
     setBusyAuctionId(auctionId);
     setMessage(null);
+    setMessageTone("info");
 
     try {
       await operation();
-      setMessage("操作已提交，列表已刷新。");
       await refreshDashboard();
+      setMessageTone("info");
+      setMessage("操作已提交，列表已刷新。");
     } catch (error: unknown) {
+      setMessageTone("error");
       setMessage(toErrorMessage(error));
     } finally {
       setBusyAuctionId(null);
@@ -189,7 +338,7 @@ export function App() {
           >
             ↻
           </button>
-          <span className="status-pill">Day 7</span>
+          <span className="status-pill">Day 10</span>
         </div>
       </header>
 
@@ -208,20 +357,27 @@ export function App() {
         </div>
       </section>
 
-      {message ? <p className={loadState === "error" ? "notice error" : "notice"}>{message}</p> : null}
+      {message ? <p className={messageTone === "error" ? "notice error" : "notice"}>{message}</p> : null}
 
       <nav className="tabs" aria-label="admin views">
         <button
           type="button"
           className={view === "auctions" ? "active" : ""}
-          onClick={() => setView("auctions")}
+          onClick={() => switchView("auctions")}
         >
           竞拍进度
         </button>
         <button
           type="button"
+          className={view === "create" ? "active" : ""}
+          onClick={() => switchView("create")}
+        >
+          商品上架
+        </button>
+        <button
+          type="button"
           className={view === "orders" ? "active" : ""}
-          onClick={() => setView("orders")}
+          onClick={() => switchView("orders")}
         >
           成交订单
         </button>
@@ -321,11 +477,169 @@ export function App() {
                     </td>
                   </tr>
                 ))}
+                {auctions?.items.length === 0 ? (
+                  <tr>
+                    <td colSpan={7}>
+                      <p className="empty-state">暂无竞拍数据。</p>
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
         </section>
-      ) : (
+      ) : null}
+
+      {view === "create" ? (
+        <section className="panel" aria-label="create auction">
+          <div className="panel-toolbar">
+            <div>
+              <h2>创建商品和竞拍</h2>
+              <p>提交后生成未开始竞拍，可在列表中启动。</p>
+            </div>
+          </div>
+
+          <form className="create-form" onSubmit={(event) => void submitCreateAuction(event)}>
+            <div className="form-section">
+              <h3>商品信息</h3>
+              <div className="form-grid">
+                <label>
+                  <span>商品名称</span>
+                  <input
+                    value={createForm.name}
+                    maxLength={80}
+                    onChange={(event) => updateCreateForm("name", event.target.value)}
+                    placeholder="翡翠手镯"
+                    required
+                  />
+                </label>
+                <label>
+                  <span>商品图片 URL</span>
+                  <input
+                    value={createForm.imageUrl}
+                    maxLength={500}
+                    onChange={(event) => updateCreateForm("imageUrl", event.target.value)}
+                    placeholder="https://example.com/item.png"
+                    required
+                  />
+                </label>
+                <label className="span-2">
+                  <span>商品介绍</span>
+                  <textarea
+                    value={createForm.description}
+                    maxLength={2000}
+                    onChange={(event) => updateCreateForm("description", event.target.value)}
+                    rows={4}
+                    required
+                  />
+                </label>
+                <label className="span-2">
+                  <span>卖点标签</span>
+                  <input
+                    value={createForm.sellingPointsText}
+                    onChange={(event) => updateCreateForm("sellingPointsText", event.target.value)}
+                    placeholder="支持鉴定，顺丰包邮"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="form-section">
+              <h3>竞拍规则</h3>
+              <div className="form-grid">
+                <label>
+                  <span>直播间 ID</span>
+                  <input
+                    value={createForm.roomId}
+                    maxLength={191}
+                    onChange={(event) => updateCreateForm("roomId", event.target.value)}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>竞拍时长（秒）</span>
+                  <input
+                    value={createForm.durationSeconds}
+                    inputMode="numeric"
+                    onChange={(event) => updateCreateForm("durationSeconds", event.target.value)}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>起拍价（元）</span>
+                  <input
+                    value={createForm.startPriceYuan}
+                    inputMode="decimal"
+                    onChange={(event) => updateCreateForm("startPriceYuan", event.target.value)}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>固定加价（元）</span>
+                  <input
+                    value={createForm.incrementYuan}
+                    inputMode="decimal"
+                    onChange={(event) => updateCreateForm("incrementYuan", event.target.value)}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>封顶价（元）</span>
+                  <input
+                    value={createForm.capPriceYuan}
+                    inputMode="decimal"
+                    onChange={(event) => updateCreateForm("capPriceYuan", event.target.value)}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>防狙击窗口（秒）</span>
+                  <input
+                    value={createForm.antiSnipingWindowSeconds}
+                    inputMode="numeric"
+                    onChange={(event) =>
+                      updateCreateForm("antiSnipingWindowSeconds", event.target.value)
+                    }
+                    required
+                  />
+                </label>
+                <label>
+                  <span>延时时长（秒）</span>
+                  <input
+                    value={createForm.extensionSeconds}
+                    inputMode="numeric"
+                    onChange={(event) => updateCreateForm("extensionSeconds", event.target.value)}
+                    required
+                  />
+                </label>
+                <label>
+                  <span>最大延时次数</span>
+                  <input
+                    value={createForm.maxExtensionCount}
+                    inputMode="numeric"
+                    onChange={(event) => updateCreateForm("maxExtensionCount", event.target.value)}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="form-actions">
+              <button type="submit" className="primary" disabled={createSubmitting}>
+                {createSubmitting ? "创建中" : "创建竞拍"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setCreateForm(initialCreateAuctionForm)}
+                disabled={createSubmitting}
+              >
+                重置
+              </button>
+            </div>
+          </form>
+        </section>
+      ) : null}
+
+      {view === "orders" ? (
         <section className="panel" aria-label="order list">
           <div className="panel-toolbar">
             <div>
@@ -375,11 +689,18 @@ export function App() {
                     <td>{formatDateTime(order.createdAt)}</td>
                   </tr>
                 ))}
+                {orders?.items.length === 0 ? (
+                  <tr>
+                    <td colSpan={6}>
+                      <p className="empty-state">暂无订单数据。</p>
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
         </section>
-      )}
+      ) : null}
 
       {loadState === "loading" ? <div className="loading-bar" /> : null}
     </main>
@@ -451,6 +772,148 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
   }
 
   return payload as T;
+}
+
+function toCreateItemPayload(form: CreateAuctionForm) {
+  return {
+    name: readRequiredText(form.name, "商品名称"),
+    imageUrl: readRequiredUrl(form.imageUrl, "商品图片 URL"),
+    description: readRequiredText(form.description, "商品介绍"),
+    sellingPoints: parseSellingPoints(form.sellingPointsText)
+  };
+}
+
+function toCreateAuctionPayload(
+  form: CreateAuctionForm,
+  itemId: string
+): CreateAuctionPayload {
+  const startPriceFen = parseYuanToFen(form.startPriceYuan, "起拍价");
+  const incrementFen = parseYuanToFen(form.incrementYuan, "固定加价");
+  const capPriceFen = parseYuanToFen(form.capPriceYuan, "封顶价");
+
+  if (incrementFen <= 0) {
+    throw new Error("固定加价必须大于 0 元");
+  }
+
+  if (capPriceFen <= startPriceFen) {
+    throw new Error("封顶价必须大于起拍价");
+  }
+
+  return {
+    roomId: readRequiredText(form.roomId, "直播间 ID"),
+    itemId,
+    startPriceFen,
+    incrementFen,
+    durationSeconds: parsePositiveInteger(form.durationSeconds, "竞拍时长"),
+    capPriceFen,
+    antiSnipingWindowSeconds: parseNonNegativeInteger(
+      form.antiSnipingWindowSeconds,
+      "防狙击窗口"
+    ),
+    extensionSeconds: parseNonNegativeInteger(form.extensionSeconds, "延时时长"),
+    maxExtensionCount: parseOptionalNonNegativeInteger(form.maxExtensionCount, "最大延时次数")
+  };
+}
+
+function readRequiredText(value: string, label: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new Error(`${label}不能为空`);
+  }
+
+  return normalized;
+}
+
+function readRequiredUrl(value: string, label: string): string {
+  const normalized = readRequiredText(value, label);
+
+  try {
+    const url = new URL(normalized);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error("unsupported protocol");
+    }
+  } catch {
+    throw new Error(`${label}必须是 http 或 https URL`);
+  }
+
+  return normalized;
+}
+
+function parseSellingPoints(value: string): string[] {
+  const points = value
+    .split(/[\n,，]/)
+    .map((point) => point.trim())
+    .filter(Boolean);
+
+  if (points.length > 10) {
+    throw new Error("卖点标签最多 10 个");
+  }
+
+  const invalidPoint = points.find((point) => point.length > 30);
+  if (invalidPoint) {
+    throw new Error(`卖点标签「${invalidPoint}」不能超过 30 字符`);
+  }
+
+  return points;
+}
+
+function parseYuanToFen(value: string, label: string): number {
+  const normalized = value.trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) {
+    throw new Error(`${label}必须是非负金额，最多保留 2 位小数`);
+  }
+
+  const [yuanPart, fenPart = ""] = normalized.split(".");
+  const fen = Number(yuanPart) * 100 + Number(fenPart.padEnd(2, "0"));
+
+  if (!Number.isSafeInteger(fen)) {
+    throw new Error(`${label}金额过大`);
+  }
+
+  return fen;
+}
+
+function parsePositiveInteger(value: string, label: string): number {
+  const parsed = parseNonNegativeInteger(value, label);
+  if (parsed <= 0) {
+    throw new Error(`${label}必须大于 0`);
+  }
+
+  return parsed;
+}
+
+function parseOptionalNonNegativeInteger(value: string, label: string): number {
+  if (!value.trim()) {
+    return 0;
+  }
+
+  return parseNonNegativeInteger(value, label);
+}
+
+function parseNonNegativeInteger(value: string, label: string): number {
+  const normalized = value.trim();
+  if (!/^\d+$/.test(normalized)) {
+    throw new Error(`${label}必须是非负整数`);
+  }
+
+  const parsed = Number(normalized);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`${label}数值过大`);
+  }
+
+  return parsed;
+}
+
+function viewFromPath(pathname: string): ViewKey {
+  if (pathname.endsWith("/admin/orders")) {
+    return "orders";
+  }
+
+  if (pathname.endsWith("/admin/items") || pathname.endsWith("/admin/items/new")) {
+    return "create";
+  }
+
+  return "auctions";
 }
 
 function formatFen(value: number): string {
