@@ -12,7 +12,9 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "pnpm -r --if-present lint",
     "test": "pnpm -r --if-present test",
-    "test:e2e": "pnpm -r --if-present test:e2e"
+    "test:e2e": "pnpm -r --if-present test:e2e",
+    "perf:day12": "pnpm --filter @live-auction/server perf:day12",
+    "perf:day12:k6": "pnpm --filter @live-auction/server perf:day12:k6"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

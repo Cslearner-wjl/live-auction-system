@@ -55,6 +55,7 @@ export interface PlaceBidResultDto {
 @Injectable()
 export class BidService {
   private readonly logger = new Logger(BidService.name);
+  private readonly auctionBidQueues = new Map<string, Promise<void>>();
 
   constructor(
     @Inject(PrismaService)
@@ -73,72 +74,97 @@ export class BidService {
     payload: PlaceBidPayload
   ): Promise<PlaceBidResultDto> {
     const input = parsePlaceBid(payload);
-    const existingBid = await this.findExistingBid(auctionId, input.clientBidId);
 
-    if (existingBid) {
-      return this.toIdempotentResult(existingBid);
-    }
+    return this.runWithAuctionBidQueue(auctionId, async () => {
+      const existingBid = await this.findExistingBid(auctionId, input.clientBidId);
 
-    const auction = await this.getAuctionForBid(auctionId);
-    const now = new Date();
-    assertAuctionCanReceiveBid(auction, now);
+      if (existingBid) {
+        return this.toIdempotentResult(existingBid);
+      }
 
-    const atomicResult = await this.atomicStore.placeBid({
-      auction,
-      userId,
-      amountFen: input.amountFen,
-      clientBidId: input.clientBidId,
-      now
-    });
+      const auction = await this.getAuctionForBid(auctionId);
+      const now = new Date();
+      assertAuctionCanReceiveBid(auction, now);
 
-    if (!atomicResult.accepted) {
-      throwAtomicRejection(atomicResult, input.clientBidId);
-    }
-
-    const persisted = await this.persistAcceptedBid({
-      auction,
-      userId,
-      clientBidId: input.clientBidId,
-      now,
-      atomic: atomicResult
-    });
-
-    let finalAuction = persisted.auction;
-    let orderId = finalAuction.order?.id;
-
-    if (atomicResult.reachedCapPrice) {
-      const settled = await this.stateMachine.settleSoldAuction(auctionId, {
-        enforceEndTime: false
+      const atomicResult = await this.atomicStore.placeBid({
+        auction,
+        userId,
+        amountFen: input.amountFen,
+        clientBidId: input.clientBidId,
+        now
       });
-      this.scheduler.clearEndTimer(auctionId);
-      finalAuction = {
-        ...settled.auction,
-        rule: auction.rule,
-        order: settled.order
-      };
-      orderId = settled.order?.id;
-    } else if (atomicResult.extended) {
-      this.scheduler.scheduleEndTimer(persisted.auction);
-    }
 
-    return {
-      accepted: true,
-      auctionId,
-      bidId: persisted.bid.id,
-      amountFen: persisted.bid.amountFen,
-      currentPriceFen: finalAuction.currentPriceFen,
-      previousPriceFen: atomicResult.previousPriceFen,
-      previousHighestBidderId: atomicResult.previousHighestBidderId,
-      highestBidderId: finalAuction.highestBidderId,
-      bidCount: finalAuction.bidCount,
-      serverSeq: persisted.bid.serverSeq,
-      extended: atomicResult.extended,
-      endTime: finalAuction.endTime?.toISOString() ?? null,
-      reachedCapPrice: atomicResult.reachedCapPrice,
-      status: finalAuction.status as AuctionStatus,
-      orderId,
-      idempotent: false
-    };
+      if (!atomicResult.accepted) {
+        throwAtomicRejection(atomicResult, input.clientBidId);
+      }
+
+      const acceptedBid = await this.persistAcceptedBid({
+        auction,
+        userId,
+        clientBidId: input.clientBidId,
+        now,
+        atomic: atomicResult
+      });
+
+      let finalAuction = acceptedBid.auction;
+      let orderId = finalAuction.order?.id;
+
+      if (atomicResult.reachedCapPrice) {
+        const settled = await this.stateMachine.settleSoldAuction(auctionId, {
+          enforceEndTime: false
+        });
+        this.scheduler.clearEndTimer(auctionId);
+        finalAuction = {
+          ...settled.auction,
+          rule: auction.rule,
+          order: settled.order
+        };
+        orderId = settled.order?.id;
+      } else if (atomicResult.extended) {
+        this.scheduler.scheduleEndTimer(acceptedBid.auction);
+      }
+
+      return {
+        accepted: true,
+        auctionId,
+        bidId: acceptedBid.bid.id,
+        amountFen: acceptedBid.bid.amountFen,
+        currentPriceFen: finalAuction.currentPriceFen,
+        previousPriceFen: atomicResult.previousPriceFen,
+        previousHighestBidderId: atomicResult.previousHighestBidderId,
+        highestBidderId: finalAuction.highestBidderId,
+        bidCount: finalAuction.bidCount,
+        serverSeq: acceptedBid.bid.serverSeq,
+        extended: atomicResult.extended,
+        endTime: finalAuction.endTime?.toISOString() ?? null,
+        reachedCapPrice: atomicResult.reachedCapPrice,
+        status: finalAuction.status as AuctionStatus,
+        orderId,
+        idempotent: false
+      };
+    });
+  }
+
+  private async runWithAuctionBidQueue<T>(
+    auctionId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const previous = this.auctionBidQueues.get(auctionId) ?? Promise.resolve();
+    const queued = previous.catch(() => undefined).then(operation);
+    const settled = queued.then(
+      () => undefined,
+      () => undefined
+    );
+
+    this.auctionBidQueues.set(auctionId, settled);
+
+    try {
+      return await queued;
+    } finally {
+      if (this.auctionBidQueues.get(auctionId) === settled) {
+        this.auctionBidQueues.delete(auctionId);
+      }
+    }
   }
 
   private async getAuctionForBid(auctionId: string): Promise<AuctionForBid> {

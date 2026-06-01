@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   AuctionStatus,
   AuctionWebSocketEvent,
+  OrderStatus,
   type AuctionLeaderboardEntry,
   type AuctionSnapshot
 } from "@live-auction/shared";
@@ -9,10 +10,12 @@ import {
   appendLiveComment,
   createAuctionSocket,
   createClientBidId,
+  getAuctionHistory,
   getAuctionSnapshot,
   getDisplayErrorMessage,
   joinRealtimeRooms,
   loadLiveRoom,
+  mockPayOrder,
   placeBidByRest,
   readMobileClientConfig,
   requestSocketSnapshot,
@@ -36,6 +39,9 @@ function LiveRoomPage() {
   const [selectedAmountFen, setSelectedAmountFen] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [resultModalOpen, setResultModalOpen] = useState(false);
+  const [wonOrderId, setWonOrderId] = useState<string | null>(null);
+  const [paymentState, setPaymentState] = useState<"pending" | "paying" | "paid">("pending");
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [realtimeState, setRealtimeState] = useState("实时连接中");
   const roomRef = useRef<LiveRoomViewModel | null>(null);
@@ -123,6 +129,33 @@ function LiveRoomPage() {
     [config, replaceSnapshot]
   );
 
+  const recoverWonOrder = useCallback(
+    async (auctionId: string, openModal: boolean) => {
+      try {
+        const history = await getAuctionHistory(config);
+        const wonItem = history.items.find(
+          (item) => item.auctionId === auctionId && item.won && item.orderId
+        );
+
+        if (!wonItem?.orderId) {
+          return;
+        }
+
+        setWonOrderId(wonItem.orderId);
+        setPaymentState(
+          wonItem.orderStatus === OrderStatus.Paid ? "paid" : "pending"
+        );
+
+        if (openModal) {
+          setResultModalOpen(true);
+        }
+      } catch (error: unknown) {
+        setToast(getDisplayErrorMessage(error));
+      }
+    },
+    [config]
+  );
+
   const loadInitialRoom = useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
@@ -135,13 +168,23 @@ function LiveRoomPage() {
       setRoom(nextRoom);
       setSelectedAmountFen(nextRoom.snapshot.nextBidAmountFen);
       setRealtimeState("实时连接中");
+      setResultModalOpen(false);
+      setWonOrderId(null);
+      setPaymentState("pending");
+
+      if (
+        nextRoom.snapshot.status === AuctionStatus.EndedSold &&
+        nextRoom.snapshot.myRank === 1
+      ) {
+        void recoverWonOrder(nextRoom.auction.auctionId, true);
+      }
     } catch (error: unknown) {
       setLoadError(getDisplayErrorMessage(error));
       setRoom(null);
     } finally {
       setIsLoading(false);
     }
-  }, [config]);
+  }, [config, recoverWonOrder]);
 
   const applySequencedEvent = useCallback(
     (
@@ -373,8 +416,21 @@ function LiveRoomPage() {
             : "竞拍结束，本场流拍"
       });
       setToast(status === AuctionStatus.EndedSold ? "竞拍已成交" : "竞拍已结束");
+      setResultModalOpen(true);
+
+      if (status === AuctionStatus.EndedSold) {
+        void recoverWonOrder(activeAuctionId, true);
+      }
     });
     socket.on(AuctionWebSocketEvent.OrderCreated, (payload: RealtimePayload) => {
+      const orderId = readString(payload.orderId);
+
+      if (orderId) {
+        setWonOrderId(orderId);
+        setPaymentState("pending");
+        setResultModalOpen(true);
+      }
+
       handlePrivateEvent(payload, "成交订单已生成");
     });
     socket.on(AuctionWebSocketEvent.AuctionCancelled, (payload: RealtimePayload) => {
@@ -411,6 +467,7 @@ function LiveRoomPage() {
     config,
     handlePrivateEvent,
     replaceSnapshot,
+    recoverWonOrder,
     room?.auction.auctionId,
     room?.roomId,
     syncSnapshot
@@ -459,6 +516,23 @@ function LiveRoomPage() {
       await syncSnapshot();
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function handleMockPay() {
+    if (!wonOrderId || paymentState === "paid" || paymentState === "paying") {
+      return;
+    }
+
+    setPaymentState("paying");
+
+    try {
+      await mockPayOrder(config, wonOrderId);
+      setPaymentState("paid");
+      setToast("模拟支付成功");
+    } catch (error: unknown) {
+      setPaymentState("pending");
+      setToast(getDisplayErrorMessage(error));
     }
   }
 
@@ -513,6 +587,16 @@ function LiveRoomPage() {
           onClose={() => setPanelOpen(false)}
           onStep={handleStep}
           onBid={() => void handleBid()}
+        />
+      ) : null}
+
+      {resultModalOpen && isEnded ? (
+        <AuctionResultModal
+          room={room}
+          orderId={wonOrderId}
+          paymentState={paymentState}
+          onClose={() => setResultModalOpen(false)}
+          onMockPay={() => void handleMockPay()}
         />
       ) : null}
 
@@ -833,6 +917,76 @@ function Leaderboard({ entries }: { entries: AuctionLeaderboardEntry[] }) {
         ))
       )}
     </section>
+  );
+}
+
+function AuctionResultModal({
+  room,
+  orderId,
+  paymentState,
+  onClose,
+  onMockPay
+}: {
+  room: LiveRoomViewModel;
+  orderId: string | null;
+  paymentState: "pending" | "paying" | "paid";
+  onClose: () => void;
+  onMockPay: () => void;
+}) {
+  const { snapshot } = room;
+  const sold = snapshot.status === AuctionStatus.EndedSold;
+  const won = sold && orderId !== null;
+  const title = won
+    ? "恭喜成交"
+    : sold
+      ? "竞拍已成交"
+      : snapshot.status === AuctionStatus.Cancelled
+        ? "竞拍已取消"
+        : "本场流拍";
+  const actionText =
+    paymentState === "paid"
+      ? "已完成支付"
+      : paymentState === "paying"
+        ? "支付中"
+        : "模拟支付";
+
+  return (
+    <div className="result-layer" role="presentation">
+      <button type="button" className="result-scrim" onClick={onClose} aria-label="关闭结果" />
+      <section className="result-modal" role="dialog" aria-modal="true" aria-label="竞拍结果">
+        <span className={`result-mark ${won ? "won" : ""}`}>
+          {won ? "成交" : statusText(snapshot.status)}
+        </span>
+        <h2>{title}</h2>
+        <p>
+          {won
+            ? "订单已生成，可以完成模拟支付。"
+            : sold
+              ? "本场竞拍已落槌，订单已发送给中拍用户。"
+              : "本场没有生成待支付订单。"}
+        </p>
+        <div className="result-metrics">
+          <Metric label={sold ? "落槌价" : "最终价格"} value={formatFen(snapshot.currentPriceFen)} />
+          <Metric label="出价次数" value={`${snapshot.bidCount} 次`} />
+        </div>
+        {orderId ? <code className="order-code">订单 {orderId}</code> : null}
+        <div className="result-actions">
+          {won ? (
+            <button
+              type="button"
+              className="primary-bid-button"
+              disabled={paymentState !== "pending"}
+              onClick={onMockPay}
+            >
+              {actionText}
+            </button>
+          ) : null}
+          <button type="button" className="secondary-button" onClick={onClose}>
+            关闭
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 

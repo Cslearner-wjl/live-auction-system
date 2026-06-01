@@ -97,7 +97,7 @@ export class AuctionSnapshotService {
         item: true
       },
       orderBy: {
-        createdAt: "desc"
+        updatedAt: "desc"
       }
     });
 

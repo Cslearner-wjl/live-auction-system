@@ -208,7 +208,18 @@ function readNumber(value: unknown): number {
 }
 
 function readOptionalNumber(value: unknown): number | undefined {
-  return value === undefined || value === null ? undefined : readNumber(value);
+  if (value === undefined || value === null || value === false || value === "") {
+    return undefined;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return readNumber(value);
 }
 
 function readOptionalNullableString(value: unknown): string | null | undefined {
@@ -301,6 +312,11 @@ local endTimeMs = tonumber(redis.call("GET", endTimeKey) or dbEndTimeMs)
 local bidCount = tonumber(redis.call("GET", bidCountKey) or dbBidCount)
 local extendedCount = tonumber(redis.call("HGET", stateKey, "extended_count") or dbExtendedCount)
 local previousUserLeaderboardAmountFen = redis.call("ZSCORE", leaderboardKey, userId)
+if previousUserLeaderboardAmountFen then
+  previousUserLeaderboardAmountFen = tonumber(previousUserLeaderboardAmountFen)
+else
+  previousUserLeaderboardAmountFen = nil
+end
 
 if dbStatus ~= "RUNNING" then
   redis.call("HSET", stateKey, "status", dbStatus)
@@ -339,14 +355,15 @@ if amountFen > capPriceFen then
   return reject("BID_EXCEEDS_CAP_PRICE", "bid amount must not exceed capPriceFen", currentPriceFen, highestBidderId, endTimeMs)
 end
 
-local serverSeq = tonumber(redis.call("HINCRBY", stateKey, "server_seq", 1))
-bidCount = tonumber(redis.call("INCR", bidCountKey))
-
 local previousPriceFen = currentPriceFen
 local previousHighestBidderId = highestBidderId
 local previousEndTimeMs = endTimeMs
 local previousExtendedCount = extendedCount
 local previousBidCount = bidCount
+
+local serverSeq = tonumber(redis.call("HINCRBY", stateKey, "server_seq", 1))
+bidCount = tonumber(redis.call("INCR", bidCountKey))
+
 local reachedCapPrice = amountFen >= capPriceFen
 local extended = false
 local newEndTimeMs = endTimeMs

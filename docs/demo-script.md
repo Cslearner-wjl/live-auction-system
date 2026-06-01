@@ -2,9 +2,9 @@
 
 本文档用于最终录屏和答辩演示。未实现功能不得在演示时宣称已完成。
 
-## 0. Day 11 可演示范围
+## 0. Day 12 可演示范围
 
-Day 11 可以演示服务端闭环、实时协议、主播端创建后台、移动端真实 REST / Socket.IO 联动，以及服务级异常场景自动化覆盖：
+Day 12 可以演示服务端闭环、实时协议、主播端创建后台、移动端真实 REST / Socket.IO 联动、服务级异常场景自动化覆盖，以及真实 HTTP + MySQL + Redis 并发压测结果：
 
 - 后台创建商品，填写商品名称、图片 URL、介绍和卖点标签。
 - 后台配置竞拍规则，支持 0 元起拍、固定加价、竞拍时长、封顶价、防狙击窗口、延时时长和最大延时次数。
@@ -27,11 +27,16 @@ Day 11 可以演示服务端闭环、实时协议、主播端创建后台、移�
 - 达到封顶价立即通过状态机成交并生成一个订单。
 - 到期后通过状态机结算为成交或流拍。
 - 成交订单可通过 `GET /admin/orders` 和 `GET /admin/orders/:orderId` 查询。
+- 中拍用户可在移动端结果弹窗查看订单号并完成模拟支付，服务端接口为 `POST /orders/:orderId/mock-pay`。
 - 服务级 e2e 已覆盖无人流拍、一人到期成交、多人连续出价、防狙击延时、封顶立即成交、运行中取消、重复点击幂等和重连 snapshot 恢复。
+- `pnpm perf:day12` 可自动准备压测用户、创建竞拍、启动竞拍、并发出价，并校验 Redis / DB / snapshot / 订单一致性。
+- Day 12 已完成真实 HTTP 30 并发出价基线：23 accepted、7 个受控 `BID_AMOUNT_TOO_LOW`、平均 546.05ms、p95 930.60ms、一致性通过。
+- Day 12 已完成真实 HTTP 100 并发出价基线：80 accepted、20 个受控 `BID_AMOUNT_TOO_LOW`、平均 1905.17ms、p95 3516.74ms、一致性通过。
 
-Day 11 不应演示为已完成的能力：
+Day 12 不应演示为已完成的能力：
 
-- 真实 k6 / Artillery 压测数据。
+- 1000 Socket.IO 连接压测数据。
+- 生产构建或云服务器环境下的压测数据。
 - 生产级多实例 outbox claim、Redis/DB 自动对账和真实支付。
 - 已经完成真实浏览器多窗口断网重连全链路压测。
 - AI 生成卖点按钮。
@@ -50,9 +55,9 @@ Day 11 不应演示为已完成的能力：
 | --- | --- | --- |
 | 第 1 分钟 | 项目背景和架构 | 商品上架到成交订单闭环；服务端集中状态机；Redis 承接热出价 |
 | 第 2 分钟 | 主播后台创建商品、配置规则、启动/取消竞拍 | 展示商品上架表单、0 元起拍、固定加价、封顶价、列表刷新和启动按钮 |
-| 第 3 分钟 | 移动端进入直播间，多用户真实出价 | 打开 `?userId=user_1` 和 `?userId=user_2` 两个窗口，展示真实 snapshot、倒计时、出价、领先 / 被超越反馈 |
-| 第 4 分钟 | 自动延时、封顶价成交、订单生成 | 展示服务端 `endTime` 延长、`ENDED_SOLD` 状态、唯一订单，以及 outbox 派发 `OUTBID`/`LEADING`/`AUCTION_EXTENDED` 的房间目标 |
-| 第 5 分钟 | 技术亮点和工程材料 | 状态机、幂等出价、WebSocket 房间隔离、snapshot 恢复、压测结果、AI 协作日志 |
+| 第 3 分钟 | 移动端进入直播间，多用户真实出价 | 打开 `?userId=user_1&auctionId=...` 和 `?userId=user_2&auctionId=...` 两个窗口，展示真实 snapshot、倒计时、出价、领先 / 被超越反馈 |
+| 第 4 分钟 | 自动延时、封顶价成交、订单生成 | 展示服务端 `endTime` 延长、`ENDED_SOLD` 状态、唯一订单、移动端结果弹窗和模拟支付，以及 outbox 派发 `OUTBID`/`LEADING`/`AUCTION_EXTENDED` 的房间目标 |
+| 第 5 分钟 | 技术亮点和工程材料 | 状态机、幂等出价、WebSocket 房间隔离、snapshot 恢复、Day 12 30/100 HTTP 压测结果、AI 协作日志 |
 
 ## 3. 讲解要点
 
@@ -61,16 +66,20 @@ Day 11 不应演示为已完成的能力：
 - 管理端页面只展示 API 状态并调用管理端接口，不在前端重复实现竞拍状态机；创建页提交前把元转换为整数分。
 - 出价使用 `clientBidId` 幂等，避免用户重复点击产生重复出价。
 - 出价先通过 Redis Lua 原子接受，再在 DB transaction 内写 Bid、AuctionSession 和 AuctionEvent outbox，避免未落库就广播成功。
+- Day 12 真实压测暴露过两个问题：Redis Lua payload 中 `ZSCORE` 空值/字符串解析，以及 Redis accepted 后 DB 并发持久化乱序；当前已分别通过类型兼容解析和单进程 `auctionId` 级出价处理队列修复。
 - WebSocket 事件按房间隔离，并通过 `serverSeq` 处理乱序。
 - 重连后以 snapshot 为准恢复，不依赖历史事件。
 - 成交订单通过 `Order(auctionId)` 唯一约束和状态机事务防重复。
+- 用户订单接口只允许买家查看和模拟支付自己的订单，非买家返回 `FORBIDDEN`；竞拍历史返回 `orderId`，便于刷新后恢复支付入口。
 
 ## 4. 风险说明
 
 - MVP 单机 timer 适合个人演示，多实例部署需要切换到 Redis delayed queue 或 BullMQ。
-- Day 11 已补服务级 e2e 异常场景，但真实 MySQL/Redis/浏览器多窗口完整闭环仍需补手工记录。
+- Day 12 已补真实 HTTP + MySQL + Redis 压测，但真实浏览器多窗口完整闭环和 1000 Socket.IO 连接压测仍需补记录。
+- per-auction 队列会牺牲同场竞拍瞬时延迟，当前本机 dev server 100 并发 p95 约 3.52s，不能作为生产性能承诺。
 - 管理端创建商品和竞拍当前复用两个接口串行调用；如果商品创建成功但竞拍创建失败，可能留下未绑定商品，后续可补后端组合事务接口。
 - Redis accepted 但 DB 写失败时会在确认该出价仍是最新 `serverSeq` 后回滚 Redis 热状态，并记录审计日志返回 `BID_PERSISTENCE_FAILED`；后续仍需要补自动对账 worker。
+- 当前同一竞拍的出价处理顺序依赖本进程内存队列；多实例部署前需要替换为 Redis Stream、消息队列、DB claim 或分布式锁。
 - 当前 outbox 发布器是单进程轮询，多实例部署前需要事件 claim 或分布式锁。
 - 真实支付、真实直播推流和完整认证不在 MVP 范围内。
 - AI 卖点生成是加分项，缺少 API Key 时必须 fallback 到 mock。

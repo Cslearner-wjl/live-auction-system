@@ -18,6 +18,7 @@ type JsonObject = Record<string, unknown>;
 export class AuctionEventPublisherService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(AuctionEventPublisherService.name);
   private timer: PublishTimer | null = null;
+  private isPublishing = false;
 
   constructor(
     @Inject(PrismaService)
@@ -28,7 +29,7 @@ export class AuctionEventPublisherService implements OnModuleInit, OnModuleDestr
 
   onModuleInit(): void {
     this.timer = setInterval(() => {
-      void this.publishPendingOnce();
+      void this.publishPendingLoop();
     }, 500) as PublishTimer;
     this.timer.unref?.();
   }
@@ -81,6 +82,20 @@ export class AuctionEventPublisherService implements OnModuleInit, OnModuleDestr
       published,
       failed
     };
+  }
+
+  private async publishPendingLoop(): Promise<void> {
+    if (this.isPublishing) {
+      return;
+    }
+
+    this.isPublishing = true;
+
+    try {
+      await this.publishPendingOnce();
+    } finally {
+      this.isPublishing = false;
+    }
   }
 
   async publishEvent(event: AuctionEvent): Promise<void> {

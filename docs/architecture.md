@@ -102,7 +102,7 @@ flowchart LR
   -> 广播 AUCTION_ENDED / ORDER_CREATED
 ```
 
-Day 10 当前实现状态：
+Day 12 当前实现状态：
 
 - `AuctionStateMachineService.finishAuction` 已实现 DB 事务内结算。
 - 有 `highestBidderId` 时流转 `ENDED_SOLD` 并创建唯一订单；无最高出价人时流转 `ENDED_UNSOLD`。
@@ -110,9 +110,11 @@ Day 10 当前实现状态：
 - `BidService` 已实现 `POST /auctions/:auctionId/bids`，Redis 热状态在首次出价时按 DB 快照惰性初始化。
 - 出价成功后已写 `Bid`、更新 `AuctionSession`，并写 `AuctionEvent(BID_ACCEPTED, outboxStatus=PENDING)`。
 - Redis accepted 但 DB 写失败时会尝试按最新 `serverSeq` 安全回滚 Redis 热状态，记录 `AuditLog(DB_WRITE_FAILED_AFTER_REDIS_ACCEPTED)` 并返回 `BID_PERSISTENCE_FAILED`。
+- 同一竞拍的幂等检查、Redis Lua 和 DB 持久化在当前单进程内按 `auctionId` 串行处理，保证失败 accepted bid 可先回滚，再处理后续请求；多实例部署仍需替换为跨进程队列、claim 或分布式锁。
 - `AuctionSnapshotService` 已提供房间竞拍列表、竞拍详情和重连 snapshot。
 - `AuctionRealtimeGateway` 已支持 `user:{userId}`、`room:{roomId}`、`auction:{auctionId}` 房间加入、snapshot 请求、Socket.IO 出价和心跳。
 - `AuctionEventPublisherService` 已从 DB outbox 发布 WebSocket 事件，并在成功后标记 `PUBLISHED`，失败时标记 `FAILED` 并写审计日志；后续轮询会重试 `FAILED` 事件。
+- Day 12 已通过真实 HTTP + MySQL + Redis 压测覆盖 30/100 并发出价，并在压测中修复 Redis Lua payload 解析和 DB 持久化顺序问题。
 - Redis/DB 自动对账仍未落地，后续实现必须继续向上述目标数据流收敛。
 
 Day 10 管理端实现状态：

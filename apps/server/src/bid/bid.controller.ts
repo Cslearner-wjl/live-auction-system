@@ -1,6 +1,8 @@
 import {
   Body,
   Controller,
+  HttpCode,
+  HttpStatus,
   Inject,
   Param,
   Post,
@@ -23,6 +25,7 @@ export class BidController {
   ) {}
 
   @Post(":auctionId/bids")
+  @HttpCode(HttpStatus.OK)
   async placeBid(
     @Param("auctionId") auctionId: string,
     @Body() body: PlaceBidPayload,

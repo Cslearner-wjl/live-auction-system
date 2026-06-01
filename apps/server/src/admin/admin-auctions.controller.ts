@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Inject,
   Param,
   Patch,
@@ -49,11 +51,13 @@ export class AdminAuctionsController {
   }
 
   @Post(":auctionId/start")
+  @HttpCode(HttpStatus.OK)
   async startAuction(@Param("auctionId") auctionId: string) {
     return this.auctionsService.startAuction(auctionId);
   }
 
   @Post(":auctionId/cancel")
+  @HttpCode(HttpStatus.OK)
   async cancelAuction(
     @Param("auctionId") auctionId: string,
     @Body() body: CancelAuctionPayload

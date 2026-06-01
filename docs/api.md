@@ -1,6 +1,6 @@
 # API 契约
 
-本文档定义直播竞拍系统的 REST API 契约。当前 Day 10 已实现管理端商品、竞拍规则配置、启动/取消、定时结束结算、管理端订单查询、管理端创建表单和页面联调、用户端出价、用户端竞拍查询、snapshot、服务端 WebSocket/outbox 广播和移动端真实 REST / Socket.IO 联动；订单支付和 AI 卖点接口仍按目标契约记录，后续实现代码必须向本文档收敛。
+本文档定义直播竞拍系统的 REST API 契约。当前已实现管理端商品、竞拍规则配置、启动/取消、定时结束结算、管理端订单查询、管理端创建表单和页面联调、用户端出价、用户端竞拍查询、snapshot、用户订单查询、竞拍历史、模拟支付、服务端 WebSocket/outbox 广播和移动端真实 REST / Socket.IO 联动；AI 卖点接口暂缓，仍按目标契约记录，后续实现代码必须向本文档收敛。
 
 ## 1. 通用约定
 
@@ -253,8 +253,11 @@ X-Demo-Role: admin
 - `GET /auctions/:auctionId`
 - `GET /auctions/:auctionId/snapshot`
 - `POST /auctions/:auctionId/bids`
+- `GET /users/me/auction-history`
+- `GET /orders/:orderId`
+- `POST /orders/:orderId/mock-pay`
 
-AI 卖点接口尚未实现；订单由状态机结算流程生成，并可通过管理端订单接口查询。
+AI 卖点接口尚未实现；订单由状态机结算流程生成，并可通过管理端订单接口和用户订单接口查询。
 
 Day 10 管理端页面已接入上述商品和竞拍接口：`/admin/items/new` 表单会先调用 `POST /admin/items`，再用返回的 `itemId` 调用 `POST /admin/auctions` 创建 `SCHEDULED` 竞拍。该页面不新增 REST 契约；规则校验、状态流转和错误码仍以后端响应为准。
 
@@ -735,7 +738,7 @@ X-Demo-Role: bidder
 
 查询直播间当前可见竞拍。
 
-已实现，用于移动端首次进入直播间或重连后恢复可见竞拍列表。
+已实现，用于移动端首次进入直播间或重连后恢复可见竞拍列表。返回列表按 `updatedAt desc` 排序，移动端再按 `RUNNING`、`SCHEDULED`、`ENDED_SOLD`、`ENDED_UNSOLD` 的优先级选择默认竞拍；演示时也可在移动端 URL 传 `auctionId` 固定到指定竞拍。
 
 200：
 
@@ -904,6 +907,8 @@ curl -X POST http://localhost:3000/auctions/auction_1/bids \
 
 查询当前用户竞拍历史。
 
+已实现。按当前 demo 用户的已接受出价聚合到竞拍维度，返回当前用户最高出价、竞拍最终状态、是否中拍，以及中拍后的订单号和支付状态。
+
 200：
 
 ```json
@@ -911,6 +916,8 @@ curl -X POST http://localhost:3000/auctions/auction_1/bids \
   "items": [
     {
       "auctionId": "auction_1",
+      "orderId": "order_1",
+      "orderStatus": "PENDING_PAYMENT",
       "itemName": "翡翠手镯",
       "myHighestBidFen": 90000,
       "finalPriceFen": 100000,
@@ -942,6 +949,8 @@ curl "http://localhost:3000/users/me/auction-history?page=1&pageSize=20" \
 
 查询当前用户可见订单详情。竞拍赢家只能查看自己的订单。
 
+已实现。非买家访问返回 `403 FORBIDDEN`。
+
 200：
 
 ```json
@@ -970,6 +979,8 @@ curl http://localhost:3000/orders/order_1 \
 ### POST /orders/:orderId/mock-pay
 
 模拟支付。仅订单买家可调用。真实支付不在 MVP 范围内。
+
+已实现。仅 `PENDING_PAYMENT` 可支付，重复支付返回 `409 ORDER_ALREADY_PAID`。
 
 200：
 

@@ -50,6 +50,7 @@ export interface MobileClientConfig {
   socketUrl: string;
   roomId: string;
   userId: string;
+  auctionId?: string;
 }
 
 export interface RoomAuctionListDto {
@@ -115,6 +116,44 @@ export interface PlaceBidResultDto {
   idempotent: boolean;
 }
 
+export interface UserOrderDto {
+  id: string;
+  auctionId: string;
+  itemId: string;
+  buyerId: string;
+  amountFen: number;
+  status: string;
+  paidAt: string | null;
+}
+
+export interface UserAuctionHistoryItemDto {
+  auctionId: string;
+  orderId: string | null;
+  orderStatus: string | null;
+  itemName: string;
+  myHighestBidFen: number;
+  finalPriceFen: number | null;
+  status: AuctionStatus;
+  won: boolean;
+  endedAt: string | null;
+}
+
+export interface UserAuctionHistoryDto {
+  items: UserAuctionHistoryItemDto[];
+  page: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface MockPayResultDto {
+  orderId: string;
+  status: string;
+  paidAt: string;
+}
+
 export interface SocketAck<T = unknown> {
   ok: boolean;
   error?: ApiErrorResponse;
@@ -164,13 +203,19 @@ export function readMobileClientConfig(): MobileClientConfig {
     )
   );
 
+  const preferredAuctionId = readFirstValue(
+    params.get("auctionId"),
+    import.meta.env.VITE_AUCTION_ID
+  );
+
   return {
     apiBaseUrl,
     socketUrl: normalizeBaseUrl(
       readFirstValue(params.get("socketUrl"), import.meta.env.VITE_SOCKET_URL, apiBaseUrl)
     ),
     roomId: readFirstValue(params.get("roomId"), import.meta.env.VITE_ROOM_ID, DEFAULT_ROOM_ID),
-    userId: readFirstValue(params.get("userId"), import.meta.env.VITE_DEMO_USER_ID, DEFAULT_USER_ID)
+    userId: readFirstValue(params.get("userId"), import.meta.env.VITE_DEMO_USER_ID, DEFAULT_USER_ID),
+    auctionId: preferredAuctionId || undefined
   };
 }
 
@@ -178,7 +223,7 @@ export async function loadLiveRoom(
   config: MobileClientConfig
 ): Promise<LiveRoomViewModel> {
   const list = await listRoomAuctions(config);
-  const selected = selectAuction(list.items);
+  const selected = selectAuction(list.items, config.auctionId);
 
   if (!selected) {
     throw new MobileApiError(
@@ -228,6 +273,28 @@ export async function placeBidByRest(
       amountFen,
       clientBidId
     })
+  });
+}
+
+export async function getOrderDetail(
+  config: MobileClientConfig,
+  orderId: string
+): Promise<UserOrderDto> {
+  return requestJson(config, `/orders/${encodeURIComponent(orderId)}`);
+}
+
+export async function getAuctionHistory(
+  config: MobileClientConfig
+): Promise<UserAuctionHistoryDto> {
+  return requestJson(config, "/users/me/auction-history");
+}
+
+export async function mockPayOrder(
+  config: MobileClientConfig,
+  orderId: string
+): Promise<MockPayResultDto> {
+  return requestJson(config, `/orders/${encodeURIComponent(orderId)}/mock-pay`, {
+    method: "POST"
   });
 }
 
@@ -466,8 +533,16 @@ function emitWithAck<T>(
   });
 }
 
-function selectAuction(items: RoomAuctionListItemDto[]): RoomAuctionListItemDto | null {
+function selectAuction(
+  items: RoomAuctionListItemDto[],
+  preferredAuctionId?: string
+): RoomAuctionListItemDto | null {
+  const preferred = preferredAuctionId
+    ? items.find((item) => item.auctionId === preferredAuctionId)
+    : undefined;
+
   return (
+    preferred ??
     items.find((item) => item.status === AuctionStatus.Running) ??
     items.find((item) => item.status === AuctionStatus.Scheduled) ??
     items.find((item) => item.status === AuctionStatus.EndedSold) ??

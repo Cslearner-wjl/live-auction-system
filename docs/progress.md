@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-当前基线：Day 11 已完成。
+当前基线：Day 12 已完成。
 
 已落地能力：
 
@@ -18,6 +18,7 @@
 - 用户端出价 API：`POST /auctions/:auctionId/bids`。
 - Redis Lua 原子出价热状态：当前价、最高出价人、结束时间、出价次数、排行榜和 `clientBidId` 热幂等键。
 - Redis accepted 后 DB 持久化失败时会尝试按最新 `serverSeq` 安全回滚热状态，并记录审计。
+- 同一竞拍的幂等检查、Redis Lua 和 DB 持久化在当前单进程内按 `auctionId` 串行处理，避免失败 accepted bid 后续无法安全回滚。
 - 出价成功后写入 `Bid`、更新 `AuctionSession` 快照字段、写入 `AuctionEvent(BID_ACCEPTED, outboxStatus=PENDING)`。
 - 达到封顶价立即通过状态机成交；防狙击窗口内有效出价延长 `endTime` 并重排本进程结束 timer。
 - WebSocket / Socket.IO gateway，支持 `room:{roomId}`、`auction:{auctionId}`、`user:{userId}` 房间隔离。
@@ -31,14 +32,17 @@
 - 移动端真实 REST service：加载房间竞拍列表、竞拍详情、snapshot，提交 HTTP 出价并展示后端错误消息。
 - 移动端真实 Socket.IO 联动：连接后加入 `room:{roomId}`、`auction:{auctionId}`，请求 snapshot，处理出价、领先、被超越、延时、结束、订单和取消事件。
 - 移动端以服务端 `serverTime` 校准倒计时，以 `serverSeq` 丢弃旧事件并在跳号时重新拉取 snapshot。
+- 用户订单接口：`GET /users/me/auction-history`、`GET /orders/:orderId`、`POST /orders/:orderId/mock-pay`。
+- 移动端成交结果弹窗和中拍用户模拟支付入口。
 - 核心规则、状态机、出价引擎、snapshot、gateway、outbox 发布和取消 outbox 单元测试。
 - Day 10 服务级核心闭环 e2e 测试，覆盖创建商品、创建竞拍、启动、用户端可见、封顶成交和后台订单可见。
 - Day 11 服务级异常场景 e2e 测试，覆盖无人流拍、一人到期成交、多人连续出价、防狙击延时、封顶成交、运行中取消、重复点击幂等、结束/取消后拒绝出价和重连 snapshot 恢复。
+- Day 12 真实 HTTP 并发压测脚本和结果，覆盖 30/100 并发出价，校验 Redis/DB/snapshot/订单一致性。
 
 尚未落地能力：
 
 - Redis/DB 自动对账任务。
-- 压测脚本和真实性能数据；当前只有服务端单元级 30/100 并发测试。
+- 1000 Socket.IO 连接压测脚本和结果。
 
 ## Day 1 已完成
 
@@ -188,15 +192,41 @@ Day 11 的主要风险和边界：
 - 真实多窗口 Socket.IO 同步、断网重连和浏览器端竞拍结束禁用仍需要在 Docker 环境下补手工记录。
 - 正式 k6 / Artillery 压测和 Redis/DB 自动对账任务仍未落地。
 
-## Day 12 下一步
+## Day 12 已完成
 
-进入并发压测与性能优化：
+- 新增 `apps/server/src/performance/day12-http-load.ts`，通过真实 HTTP API 自动创建商品、创建竞拍、启动竞拍、准备 bidder 用户、并发出价，并校验 Redis/DB/snapshot/订单一致性。
+- 新增 `apps/server/src/performance/day12-bid-load.k6.js`，提供 k6 HTTP 出价压测模板。
+- 新增脚本入口：`pnpm perf:day12`、`pnpm perf:day12:k6`。
+- 启动 Docker MySQL/Redis 和 `pnpm dev:server` 后，完成真实 30 并发出价基线：18 accepted、12 个受控 `BID_AMOUNT_TOO_LOW`、平均 299.02ms、p95 593.42ms、一致性通过。
+- 完成真实 100 并发出价基线：71 accepted、29 个受控 `BID_AMOUNT_TOO_LOW`、平均 1146.04ms、p95 2459.74ms、一致性通过。
+- 压测发现并修复真实 Redis Lua payload 解析问题：`previousUserLeaderboardAmountFen` 的 nil/字符串返回会导致 500。
+- 压测发现并修复 Redis accepted 后 DB 并发持久化乱序问题：当前单进程内按 `auctionId` 串行处理同一竞拍的幂等检查、Redis Lua 和 DB 持久化，保证失败 accepted bid 可先安全回滚。
+- 新增单元测试覆盖 Redis payload 解析、同一竞拍出价顺序，以及失败 accepted bid 回滚后再处理后续出价。
+- 更新性能报告、手工测试、演示脚本、AI 日志和本地学习沉淀。
 
-- 补充 k6 或 Artillery 脚本，优先覆盖真实 HTTP + Redis + MySQL 下 30/100 并发出价。
-- 补充 100/1000 Socket.IO 连接压测或分阶段连接稳定性验证。
-- 压测后校验当前价单调、最高出价人唯一、`bidCount` 与 accepted Bid 数一致、订单不重复。
-- 将真实性能数据写入 `docs/performance-report.md`，不再只记录 fake 环境一致性测试。
-- 继续设计或实现 Redis/DB 自动对账任务。
+Day 12 的主要风险和边界：
+
+- 本轮真实性能数据来自本机 dev server，不代表生产构建或云服务器性能。
+- HTTP 并发出价已覆盖 30/100；1000 Socket.IO 连接压测尚未执行。
+- 当前 per-auction 出价处理队列是单进程内存方案，多实例部署仍需要 Redis Stream、消息队列、DB claim 或分布式锁。
+- outbox retry 仍没有退避、重试次数和死信队列。
+
+## Day 13 审查补强
+
+当前 Day 13 AI 加成暂缓，已优先做完整演示审查和主链路补强：
+
+- 修复同一竞拍出价处理队列粒度，避免失败 accepted bid 后续无法安全回滚。
+- outbox 定时发布增加单进程防重入。
+- 补齐用户订单、竞拍历史和模拟支付接口。
+- 移动端新增成交结果弹窗和模拟支付入口，刷新已中拍场次时可通过竞拍历史恢复订单号。
+- 移动端支持 `auctionId` 查询参数定向进入，房间竞拍列表按最近更新排序，降低压测历史数据影响演示的风险。
+- 新增 `docs/day14-demo-checklist.md` 跟踪 Day14 演示前检查项。
+
+Day 14 前继续：
+
+- 真实浏览器双窗口联调并补手工记录。
+- 最新代码下重跑 `pnpm perf:day12` 30/100 并发压测并更新性能报告。
+- 根据最终录屏流程修正文档和演示脚本。
 
 ## 文档维护规则
 

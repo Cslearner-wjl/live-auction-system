@@ -2,7 +2,7 @@
 
 本文档用于记录难以完全自动化的演示级流程。每次完成相关功能后，在结果栏记录日期、环境和结论。
 
-当前基线：Day 11 已完成。出价 API、Redis Lua、封顶成交、防狙击延时、Socket.IO 房间隔离、outbox 广播、重连 snapshot、管理端创建商品 / 竞拍表单、管理端工作台和移动端真实 REST / Socket.IO 页面已有自动化、类型检查或构建检查；Day 10 核心闭环和 Day 11 异常场景已有 `pnpm test:e2e` 服务级覆盖，真实 MySQL/Redis/浏览器闭环、多窗口真实联动和正式压测仍需后续补测。
+当前基线：Day 12 已完成。出价 API、Redis Lua、封顶成交、防狙击延时、Socket.IO 房间隔离、outbox 广播、重连 snapshot、管理端创建商品 / 竞拍表单、管理端工作台和移动端真实 REST / Socket.IO 页面已有自动化、类型检查或构建检查；Day 12 已补真实 HTTP 30/100 并发压测和一致性校验，真实浏览器多窗口联动和 1000 Socket.IO 连接压测仍需后续补测。
 
 | 场景 | 前置条件 | 操作 | 预期结果 | 结果 |
 | --- | --- | --- | --- | --- |
@@ -20,6 +20,7 @@
 | 主播取消竞拍 | 竞拍 `SCHEDULED` 或 `RUNNING` | 后台点击取消并填写原因 | 状态变为 `CANCELLED`，本进程结束 timer 被清理；广播 `AUCTION_CANCELLED` | 2026-05-31：Day 11 服务级 e2e 覆盖运行中取消、取消事件和后续出价返回已取消；真实浏览器广播待补测 |
 | 断线重连 snapshot 恢复 | 竞拍运行中且已有出价 | 断开移动端 WebSocket 后重连 | 重新拉取 snapshot，当前价、倒计时和领先状态正确 | 2026-05-31：Day 11 服务级 e2e 覆盖出价后 snapshot 当前价、最高出价人、我的排名和参与人数恢复；真实断网重连待补测 |
 | 订单唯一性 | 多用户并发冲击封顶价 | 同时提交多个达到封顶价的出价 | 仅一个最高出价人，仅一个订单 | 2026-05-25：服务端单元测试已覆盖并发封顶只接受一个出价、只创建一个订单 |
+| 用户端结果弹窗和模拟支付 | 当前用户中拍并收到 `ORDER_CREATED` | 观察移动端结果弹窗，点击“模拟支付” | 返回支付成功 toast，订单状态变为 `PAID` | 2026-05-31：真实 HTTP 已验证封顶成交后用户历史返回 `orderId`、订单详情可查、`mock-pay` 成功；浏览器打开 `http://localhost:5174/?userId=user_1&auctionId=...` 可恢复结果弹窗并显示“已完成支付” |
 
 ## Day 4 补充检查
 
@@ -98,7 +99,7 @@
 
 待补真实环境检查：
 
-- 打开 `http://localhost:5174/?userId=user_1` 和 `http://localhost:5174/?userId=user_2`，交替出价，验证当前价、排行榜、领先 / 被超越提示同步。
+- 打开 `http://localhost:5174/?userId=user_1&auctionId=...` 和 `http://localhost:5174/?userId=user_2&auctionId=...`，交替出价，验证当前价、排行榜、领先 / 被超越提示同步。2026-05-31：单窗口结果弹窗和 `auctionId` 定向进入已通过浏览器烟测，双窗口交替出价仍需最终手测。
 - 手动断开移动端网络或刷新页面，验证重连后 snapshot 恢复最新价格、倒计时和我的排名。
 - 等待到期或冲击封顶价，验证竞拍结束后移动端禁用出价并展示成交 / 流拍状态。
 
@@ -138,6 +139,28 @@
 - Docker MySQL/Redis/server/admin/mobile 全链路下，通过管理端页面创建商品和竞拍，再用两个移动端窗口交替出价。
 - 人为刷新或断开移动端 Socket.IO 后重连，观察页面是否以最新 snapshot 恢复。
 - 真实浏览器收到 `AUCTION_EXTENDED`、`AUCTION_CANCELLED`、`AUCTION_ENDED` 后的 UI 禁用和提示效果。
+
+## Day 12 真实 HTTP 并发压测
+
+已覆盖：
+
+- `pnpm perf:day12` 默认 30 并发出价，真实 server + MySQL + Redis 环境下通过。
+- `DAY12_BID_ATTEMPTS=100 pnpm perf:day12` 真实 100 并发出价通过。
+- 脚本自动创建商品和竞拍、启动竞拍、准备 bidder 用户、并发出价、读取 admin 竞拍详情、snapshot、订单列表和 Redis 热 key 做一致性校验。
+- 30 并发结果：23 accepted，7 个受控 `BID_AMOUNT_TOO_LOW`，平均 546.05ms，p95 930.60ms，Redis/DB/snapshot/订单一致。
+- 100 并发结果：80 accepted，20 个受控 `BID_AMOUNT_TOO_LOW`，平均 1905.17ms，p95 3516.74ms，Redis/DB/snapshot/订单一致。
+
+压测中修复：
+
+- Redis Lua 真实 payload 中 `previousUserLeaderboardAmountFen` 的 nil/字符串解析导致 500。
+- Redis accepted 后 DB 并发持久化乱序导致 `BID_PERSISTENCE_FAILED` 和热状态无法回滚。
+
+仍需补测：
+
+- 1000 Socket.IO 连接压测。
+- 生产构建模式下的同场景压测。
+- 多轮压测平均值和机器配置补全。
+- 单竞拍出价处理队列补强后，100 并发 p95 升至约 3.52s；Day14 演示可接受，生产优化需要跨进程队列或 claim 机制。
 
 ## 记录格式
 

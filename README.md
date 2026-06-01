@@ -6,7 +6,7 @@
 商品上架 -> 规则配置 -> 直播间展示 -> 实时出价 -> 动态排名 -> 竞拍结束 -> 成交订单
 ```
 
-当前处于 Day 11：服务端出价 API、Redis Lua 原子出价、幂等、封顶成交、防狙击延时、WebSocket 房间隔离、断线重连 snapshot、outbox 广播发布、移动端真实 REST / Socket.IO 竞拍联动、主播端创建商品 / 配置竞拍 / 启动 / 取消 / 查看订单闭环已落地；Day 11 已补服务级 e2e 异常场景覆盖，正式压测仍在后续范围。
+当前处于 Day 13 审查补强：服务端出价 API、Redis Lua 原子出价、幂等、封顶成交、防狙击延时、WebSocket 房间隔离、断线重连 snapshot、outbox 广播发布、移动端真实 REST / Socket.IO 竞拍联动、主播端创建商品 / 配置竞拍 / 启动 / 取消 / 查看订单闭环已落地；Day 12 已补真实 HTTP 并发压测脚本和 30/100 并发基线数据，Day 13 暂缓 AI 加成并补强 Day14 演示主链路。
 
 ## 技术栈
 
@@ -110,6 +110,14 @@ pnpm test:e2e
 curl http://localhost:3000/health
 ```
 
+运行 Day 12 HTTP 并发压测：
+
+```bash
+pnpm perf:day12
+```
+
+默认会创建并启动一场短期压测竞拍，发起 30 次并发出价，并校验 Redis 热状态、数据库快照、snapshot 和订单唯一性。可用 `DAY12_BID_ATTEMPTS=100 pnpm perf:day12` 跑 100 次并发出价。k6 模板入口为 `pnpm perf:day12:k6`，需要本机已安装 k6 并提供 `DAY12_AUCTION_ID`。
+
 ## 环境变量
 
 复制 `.env.example` 到 `.env` 后填写本地配置。真实密钥只允许放在 `.env`，不得提交。
@@ -196,7 +204,8 @@ curl http://localhost:3000/health
 - Socket.IO 连接后加入 `room:{roomId}` 和 `auction:{auctionId}`，并通过 `requestSnapshot` 做重连恢复。
 - 出价按钮提交真实 `POST /auctions/:auctionId/bids`，生成稳定 `clientBidId`，并展示服务端错误消息。
 - 移动端处理 `BID_ACCEPTED`、`LEADING`、`OUTBID`、`AUCTION_EXTENDED`、`AUCTION_ENDED`、`ORDER_CREATED` 和 `AUCTION_CANCELLED`。
-- 保留 `?roomId=room_1&userId=user_2` 这类查询参数，便于多窗口模拟不同用户联调。
+- 保留 `?roomId=room_1&userId=user_2&auctionId=...` 这类查询参数，便于多窗口模拟不同用户并固定到同一竞拍联调。
+- 移动端成交后可展示结果弹窗，中拍用户收到订单事件后可调用模拟支付。
 - 修复 demo seed 和 Redis 出价序列初始化问题，`auction_1` 可以重复 seed、启动并完成真实出价联调。
 
 ## Day 10 完成内容
@@ -223,14 +232,33 @@ curl http://localhost:3000/health
 - 覆盖主播取消运行中竞拍、写入 `AUCTION_CANCELLED` outbox、后续出价返回竞拍已取消。
 - 覆盖重复点击同一 `clientBidId` 返回幂等结果，不重复写入 Bid 或成功事件。
 
+## Day 12 完成内容
+
+- 新增 `apps/server/src/performance/day12-http-load.ts`，可对真实 server + MySQL + Redis 发起 HTTP 并发出价压测。
+- 新增 `apps/server/src/performance/day12-bid-load.k6.js`，作为 k6 外部压测模板。
+- 新增脚本入口：`pnpm perf:day12`、`pnpm perf:day12:k6`。
+- 真实 HTTP 压测覆盖 30 和 100 并发出价，并自动校验 Redis 当前价、最高出价人、`bidCount`、排行榜、数据库快照、snapshot 和重复订单。
+- 压测发现并修复真实 Redis Lua payload 中 `previousUserLeaderboardAmountFen` 解析问题。
+- 压测发现并修复 Redis accepted 后 DB 并发持久化乱序问题；Day13 审查后进一步把同一竞拍的幂等检查、Redis Lua 和 DB 持久化整体放入当前单进程 `auctionId` 级队列，避免失败 accepted bid 后续无法安全回滚。
+- `docs/performance-report.md` 已记录真实 30/100 HTTP 并发基线数据。
+
+## Day 13 审查补强
+
+- 暂缓 AI 卖点 / 直播话术功能，优先补完整演示主链路。
+- 同一竞拍的幂等检查、Redis Lua 和 DB 持久化整体进入当前单进程 `auctionId` 级队列，避免失败 accepted bid 后续无法安全回滚。
+- outbox 定时发布增加单进程防重入。
+- 新增用户端订单和模拟支付接口：`GET /users/me/auction-history`、`GET /orders/:orderId`、`POST /orders/:orderId/mock-pay`。
+- 移动端新增竞拍结果弹窗和模拟支付入口；刷新到已中拍场次时可通过竞拍历史恢复订单号。
+- 新增 `docs/day14-demo-checklist.md`，记录 Day14 演示前检查项和剩余风险。
+
 ## 当前限制
 
 - 移动端真实出价依赖服务端、MySQL、Redis 已启动，且目标竞拍已经由后台启动为 `RUNNING`。
 - 移动端当前以 HTTP `POST /auctions/:auctionId/bids` 作为主出价路径，Socket.IO `placeBid` 仍作为服务端能力保留。
 - 管理端创建商品和竞拍复用两个既有接口串行调用；如果商品创建成功但竞拍创建失败，可能留下未绑定商品，后续可补一个后端组合事务接口。
-- Day10/Day11 e2e 是服务级 fake 环境测试，不等同于真实 MySQL + Redis + 浏览器全链路测试；真实浏览器多窗口和真实 Docker 端到端联调仍需手工记录。
+- Day10/Day11 e2e 是服务级 fake 环境测试；Day12 已补真实 HTTP + Redis + MySQL 压测，但真实浏览器多窗口和 1000 Socket.IO 连接压测仍需后续记录。
 - 当前结束调度是 MVP 单机 timer，多实例部署需要切换到 Redis delayed queue 或 BullMQ。
-- Redis accepted 但 DB 写失败时会尝试安全回滚热状态；如果热状态已被后续出价推进，则不会强行覆盖，后续仍需要 Redis/DB 对账任务。
+- 同一竞拍的出价处理在当前单进程内按竞拍串行排队；多实例部署仍需要 Redis Stream、消息队列或 DB claim 机制保证跨进程顺序。
 - 封顶成交会让数据库 `serverSeq` 继续推进到结束和订单事件；Redis 热状态中的 seq/status 暂不反向同步，后续对账任务需要覆盖。
 - outbox retry 目前没有 retry 次数、退避和死信队列，坏 payload 会重复失败并写审计。
-- 真实性能压测脚本和报告仍需补充；当前只有服务端单元级并发测试。
+- 1000 Socket.IO 连接压测、Redis/DB 周期自动对账和 outbox 退避/死信队列仍需补充。

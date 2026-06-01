@@ -13,6 +13,7 @@ import {
 import { AuctionErrorCode } from "@live-auction/shared";
 import { AuctionSchedulerService } from "../auction/auction-scheduler.service";
 import { AuctionStateMachineService } from "../auction/auction-state-machine.service";
+import { RedisService } from "../cache/redis.service";
 import { ApiException } from "../common/api-error";
 import { PrismaService } from "../prisma/prisma.service";
 import {
@@ -38,6 +39,7 @@ class FakePrisma {
   }> = [];
   readonly orders = new Map<string, Order>();
   readonly auditLogs: Array<Record<string, unknown>> = [];
+  readonly bidCreateDelayByClientBidId = new Map<string, number>();
   failNextBidCreate = false;
   forceAuctionUpdateConflict = false;
 
@@ -123,6 +125,11 @@ class FakePrisma {
       if (this.failNextBidCreate) {
         this.failNextBidCreate = false;
         throw new Error("forced bid persistence failure");
+      }
+
+      const delayMs = this.bidCreateDelayByClientBidId.get(data.clientBidId);
+      if (delayMs) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
 
       const existing = [...this.bids.values()].find(
@@ -410,6 +417,14 @@ class FakeScheduler {
   }
 }
 
+class FakeRedisEval {
+  constructor(private readonly result: string) {}
+
+  async eval(): Promise<string> {
+    return this.result;
+  }
+}
+
 describe("BidService.placeBid", () => {
   it("accepts a zero-start first bid and writes an outbox event", async () => {
     const { prisma, service } = makeBidService();
@@ -575,9 +590,17 @@ describe("BidService.placeBid", () => {
         })
       )
     );
-    const accepted = attempts.filter((attempt) => attempt.status === "fulfilled");
+    const fulfilled = attempts.filter((attempt) => attempt.status === "fulfilled");
+    const firstAccepts = fulfilled.filter(
+      (attempt) => attempt.status === "fulfilled" && !attempt.value.idempotent
+    );
+    const idempotentReplies = fulfilled.filter(
+      (attempt) => attempt.status === "fulfilled" && attempt.value.idempotent
+    );
 
-    assert.equal(accepted.length, 1);
+    assert.equal(fulfilled.length, 10);
+    assert.equal(firstAccepts.length, 1);
+    assert.equal(idempotentReplies.length, 9);
     assert.equal(prisma.bids.size, 1);
     assert.equal(prisma.auctions.get("auction_1")?.bidCount, 1);
   });
@@ -607,6 +630,68 @@ describe("BidService.placeBid", () => {
 
   it("keeps price monotonic and bidCount consistent for 100 concurrent bids", async () => {
     await assertConcurrentBids(100);
+  });
+
+  it("serializes bid processing per auction to keep Redis and DB sequences aligned", async () => {
+    const { prisma, service } = makeBidService({
+      capPriceFen: 1_000_000
+    });
+    prisma.bidCreateDelayByClientBidId.set("slow_first", 25);
+
+    const [first, second] = await Promise.all([
+      service.placeBid("auction_1", "user_1", {
+        amountFen: 1000,
+        clientBidId: "slow_first"
+      }),
+      service.placeBid("auction_1", "user_2", {
+        amountFen: 2000,
+        clientBidId: "fast_second"
+      })
+    ]);
+
+    assert.equal(first.serverSeq, 1);
+    assert.equal(second.serverSeq, 2);
+    assert.deepEqual(
+      prisma.events.map((event) => event.serverSeq),
+      [1, 2]
+    );
+    assert.equal(prisma.auctions.get("auction_1")?.currentPriceFen, 2000);
+    assert.equal(prisma.auctions.get("auction_1")?.bidCount, 2);
+  });
+
+  it("rolls back a failed accepted bid before processing later bids in the same auction", async () => {
+    const { atomicStore, prisma, service } = makeBidService({
+      capPriceFen: 1_000_000
+    });
+    prisma.failNextBidCreate = true;
+
+    const [failed, later] = await Promise.allSettled([
+      service.placeBid("auction_1", "user_1", {
+        amountFen: 1000,
+        clientBidId: "first_fails"
+      }),
+      service.placeBid("auction_1", "user_2", {
+        amountFen: 2000,
+        clientBidId: "second_after_rollback"
+      })
+    ]);
+
+    assert.equal(failed.status, "rejected");
+    assert.equal(later.status, "fulfilled");
+
+    if (later.status === "fulfilled") {
+      assert.equal(later.value.serverSeq, 1);
+      assert.equal(later.value.bidCount, 1);
+      assert.equal(later.value.currentPriceFen, 2000);
+    }
+
+    assert.equal(atomicStore.rollbackCalls.length, 1);
+    assert.equal(prisma.bids.size, 1);
+    assert.equal(prisma.events.length, 1);
+    assert.equal(prisma.auctions.get("auction_1")?.serverSeq, 1);
+    assert.equal(prisma.auctions.get("auction_1")?.bidCount, 1);
+    assert.equal(atomicStore.getState("auction_1")?.serverSeq, 1);
+    assert.equal(atomicStore.getState("auction_1")?.bidCount, 1);
   });
 
   it("rolls back Redis hot state when DB persistence fails after atomic accept", async () => {
@@ -654,6 +739,83 @@ describe("BidService.placeBid", () => {
     assert.equal(prisma.events.length, 0);
     assert.equal(atomicStore.rollbackCalls.length, 1);
     assert.equal(prisma.auctions.get("auction_1")?.currentPriceFen, 0);
+  });
+});
+
+describe("RedisBidAtomicStore.placeBid", () => {
+  it("parses missing and existing leaderboard scores from Redis script payloads", async () => {
+    const endTimeMs = Date.now() + 60_000;
+    const missingScoreStore = new RedisBidAtomicStore(
+      new FakeRedisEval(
+        JSON.stringify({
+          accepted: true,
+          auctionId: "auction_1",
+          amountFen: 1000,
+          previousPriceFen: 0,
+          currentPriceFen: 1000,
+          previousHighestBidderId: "",
+          previousEndTimeMs: endTimeMs,
+          previousExtendedCount: 0,
+          previousBidCount: 0,
+          previousUserLeaderboardAmountFen: false,
+          highestBidderId: "user_1",
+          bidCount: 1,
+          serverSeq: 1,
+          extended: false,
+          newEndTimeMs: endTimeMs,
+          newExtendedCount: 0,
+          reachedCapPrice: false
+        })
+      ) as unknown as RedisService
+    );
+    const existingScoreStore = new RedisBidAtomicStore(
+      new FakeRedisEval(
+        JSON.stringify({
+          accepted: true,
+          auctionId: "auction_1",
+          amountFen: 2000,
+          previousPriceFen: 1000,
+          currentPriceFen: 2000,
+          previousHighestBidderId: "user_2",
+          previousEndTimeMs: endTimeMs,
+          previousExtendedCount: 0,
+          previousBidCount: 1,
+          previousUserLeaderboardAmountFen: "1000",
+          highestBidderId: "user_1",
+          bidCount: 2,
+          serverSeq: 2,
+          extended: false,
+          newEndTimeMs: endTimeMs,
+          newExtendedCount: 0,
+          reachedCapPrice: false
+        })
+      ) as unknown as RedisService
+    );
+
+    const missingScore = await missingScoreStore.placeBid({
+      auction: makeAuction(),
+      userId: "user_1",
+      amountFen: 1000,
+      clientBidId: "missing_score",
+      now: new Date()
+    });
+    const existingScore = await existingScoreStore.placeBid({
+      auction: makeAuction(),
+      userId: "user_1",
+      amountFen: 2000,
+      clientBidId: "existing_score",
+      now: new Date()
+    });
+
+    assert.equal(missingScore.accepted, true);
+    assert.equal(existingScore.accepted, true);
+
+    if (missingScore.accepted && existingScore.accepted) {
+      assert.equal(missingScore.previousBidCount, 0);
+      assert.equal(missingScore.previousUserLeaderboardAmountFen, null);
+      assert.equal(existingScore.previousBidCount, 1);
+      assert.equal(existingScore.previousUserLeaderboardAmountFen, 1000);
+    }
   });
 });
 

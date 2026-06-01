@@ -227,3 +227,51 @@
 | human-reviewed decisions | 本轮不引入新测试框架，不把服务级 e2e 包装成真实浏览器或真实压测；继续复用现有 service 层边界验证业务闭环，真实 Docker 多窗口联动留作手工记录和 Day 12 压测前置 |
 | tests run | `pnpm --filter @live-auction/server test:e2e`、`pnpm --filter @live-auction/server typecheck`、`pnpm test:e2e`、`pnpm typecheck`、`pnpm test`、`pnpm lint`、`pnpm build` |
 | known issues | Day 11 新增 e2e 仍使用 fake Prisma / fake Redis store，不覆盖真实网络、真实 MySQL/Redis 连接、真实浏览器 UI 和 Socket.IO 断网重连；正式压测脚本、Redis/DB 周期对账、outbox 退避/死信仍未实现 |
+
+## 2026-05-31
+
+| 字段 | 内容 |
+| --- | --- |
+| task | Day 12 开发：真实 HTTP 并发压测、压测暴露问题修复和文档同步 |
+| prompt summary | 用户要求先压缩必要信息，再继续完成 Day 12 并更新文档 |
+| files changed | `apps/server/src/performance/day12-http-load.ts`、`apps/server/src/performance/day12-bid-load.k6.js`、`apps/server/src/bid/bid-redis.store.ts`、`apps/server/src/bid/bid.service.ts`、`apps/server/src/bid/bid.service.test.ts`、`apps/server/package.json`、`package.json`、`README.md`、`docs/README.md`、`docs/progress.md`、`docs/architecture.md`、`docs/consistency.md`、`docs/manual-test.md`、`docs/performance-report.md`、`docs/demo-script.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | Day 12 HTTP 压测脚本、k6 HTTP 模板、真实压测数据记录、Redis Lua payload 解析兼容、同一竞拍单进程出价处理队列、对应单元测试和文档同步 |
+| human-reviewed decisions | 本轮优先补真实 HTTP + MySQL + Redis 压测，不把 k6 模板或 1000 Socket.IO 连接写成已完成；同一竞拍的幂等检查、Redis Lua 和 DB 持久化先用单进程 `auctionId` 级队列兜住 MVP，一旦多实例部署必须切到 Redis Stream、消息队列、DB claim 或分布式锁 |
+| tests run | `docker compose up -d mysql redis`、`pnpm --filter @live-auction/server prisma:generate`、`pnpm --filter @live-auction/server exec prisma migrate status --schema prisma/schema.prisma`、`pnpm --filter @live-auction/server prisma:seed`、`pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/server build`、`pnpm --filter @live-auction/server test`、`pnpm perf:day12`、`$env:DAY12_BID_ATTEMPTS='100'; pnpm perf:day12; Remove-Item Env:DAY12_BID_ATTEMPTS`、`pnpm test:e2e`、`pnpm typecheck`、`pnpm test`、`pnpm lint`、`pnpm build` |
+| known issues | 本轮压测运行在本机 dev server，不代表生产构建或云环境性能；1000 Socket.IO 连接压测、真实浏览器多窗口断网联动、Redis/DB 周期自动对账、outbox 退避/死信队列仍未完成；单进程出价处理队列不适用于多实例部署 |
+
+## 2026-05-31
+
+| 字段 | 内容 |
+| --- | --- |
+| task | Day 13 审查补强：暂缓 AI 加成，修复演示主链路问题并整理 Day14 清单 |
+| prompt summary | 用户要求全面审查代码、查找 bug，暂缓 Day13 AI 加成，列出距离 Day14 完整演示还差什么，并尽全力解决 |
+| files changed | `apps/server/src/bid/bid.service.ts`、`apps/server/src/bid/bid.service.test.ts`、`apps/server/src/realtime/auction-event-publisher.service.ts`、`apps/server/src/realtime/auction-snapshot.service.ts`、`apps/server/src/realtime/auction-snapshot.service.test.ts`、`apps/server/src/order/*`、`apps/server/src/app.module.ts`、`apps/mobile/src/App.tsx`、`apps/mobile/src/mobile-auction-service.ts`、`apps/mobile/src/styles.css`、`README.md`、`docs/README.md`、`docs/api.md`、`docs/progress.md`、`docs/architecture.md`、`docs/consistency.md`、`docs/manual-test.md`、`docs/performance-report.md`、`docs/demo-script.md`、`docs/day14-demo-checklist.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | 出价处理队列粒度补强、outbox 发布防重入、用户订单 / 竞拍历史 / mock-pay 接口、竞拍历史订单号恢复、移动端结果弹窗和模拟支付入口、`auctionId` 定向进入、房间竞拍列表按最近更新排序、Day14 演示清单 |
+| human-reviewed decisions | AI 卖点功能暂缓，优先保证商品上架到成交订单和模拟支付的可演示闭环；单进程队列是 MVP 演示兜底，多实例仍必须替换为跨进程队列或 claim；1000 Socket.IO 压测不写成已完成 |
+| tests run | `pnpm --filter @live-auction/server test`、`pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/mobile typecheck`、`pnpm --filter @live-auction/mobile build`、`pnpm perf:day12`、`$env:DAY12_BID_ATTEMPTS='100'; pnpm perf:day12; Remove-Item Env:DAY12_BID_ATTEMPTS`、真实 HTTP 封顶成交后查询用户历史 / 订单详情 / mock-pay、浏览器打开 `http://localhost:5174/?userId=user_1&auctionId=...` 验证结果弹窗和支付、`pnpm typecheck`、`pnpm test`、`pnpm test:e2e`、`pnpm lint`、`pnpm build` |
+| known issues | 真实浏览器双窗口交替出价和断网重连仍需最终手测记录；Redis/DB 周期自动对账、outbox 退避/死信和 1000 Socket.IO 压测仍未完成；per-auction 单进程队列提升一致性但增加同场高并发延迟 |
+
+## 2026-06-01
+
+| 字段 | 内容 |
+| --- | --- |
+| task | 根据本周完成情况整理周报 |
+| prompt summary | 用户要求根据本周完成情况写一份周报，包括本周主要进展、遇到的问题、具体设计等 |
+| files changed | `docs/weekly-report-2026-06-01.md`、`docs/README.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | 周报结构、本周进展归纳、出价链路 / 实时事件 / 状态机 / 前端状态设计说明、问题处理表、风险和下周计划 |
+| human-reviewed decisions | 周报统计口径明确为 `2026-05-26` 至 `2026-06-01`；只记录已在进度、日志和性能报告中出现的事实，不把 1000 Socket.IO 压测、Redis/DB 自动对账、AI 卖点等未完成能力写成已完成 |
+| tests run | 文档任务，未运行代码测试；执行文档读取、Git 记录和内容一致性检查 |
+| known issues | 周报基于当前仓库文档和工作区改动整理；真实浏览器双窗口最终手测、1000 Socket.IO 压测、Redis/DB 周期对账仍需后续补齐 |
+
+## 2026-06-01
+
+| 字段 | 内容 |
+| --- | --- |
+| task | 最终推送前审视：检查项目与 diff，修复审视发现问题，形成最终可部署差距评估和计划文档 |
+| prompt summary | 用户要求完整审视项目以及 diff，无误后推送至 GitHub，并评估距离最终完整可部署项目还有多远，形成最终计划文档 |
+| files changed | `apps/server/src/bid/bid-redis.store.ts`、`apps/server/src/performance/day12-bid-load.k6.js`、`docs/final-deployment-plan.md`、`docs/README.md`、`docs/performance-report.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | Redis 回滚计数审视修复、k6 阈值配置化、最终可部署差距评估、P0 阻断项和分阶段计划 |
+| human-reviewed decisions | 不把当前单进程队列、demo 身份、未执行的 1000 Socket.IO 压测描述为生产化完成；按演示可用和生产化可部署两个口径分别评估距离 |
+| tests run | `pnpm --filter @live-auction/server test`、`pnpm typecheck`、`pnpm test`、`pnpm test:e2e`、`pnpm lint`、`pnpm build`、`git diff --check`、secrets 关键词扫描、确认 `docs/learning/` 未进入 Git 状态 |
+| known issues | 多实例出价顺序、Redis/DB 自动对账、outbox claim/死信、1000 Socket.IO 压测、真实认证和生产部署流水线仍是最终可部署前的主要缺口 |

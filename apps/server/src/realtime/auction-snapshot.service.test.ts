@@ -72,11 +72,16 @@ class FakePrisma {
       };
     },
     findMany: async ({
-      where
+      where,
+      orderBy
     }: {
       where: {
         roomId: string;
         status: { in: PrismaAuctionStatus[] };
+      };
+      orderBy?: {
+        updatedAt?: "desc";
+        createdAt?: "desc";
       };
     }) =>
       [...this.auctions.values()]
@@ -84,6 +89,17 @@ class FakePrisma {
           (auction) =>
             auction.roomId === where.roomId && where.status.in.includes(auction.status)
         )
+        .sort((left, right) => {
+          if (orderBy?.updatedAt === "desc") {
+            return right.updatedAt.getTime() - left.updatedAt.getTime();
+          }
+
+          if (orderBy?.createdAt === "desc") {
+            return right.createdAt.getTime() - left.createdAt.getTime();
+          }
+
+          return 0;
+        })
         .map((auction) => ({
           ...auction,
           item: this.items.get(auction.itemId) as AuctionItem
@@ -173,6 +189,41 @@ describe("AuctionSnapshotService", () => {
     assert.equal(result.items[0]?.auctionId, "auction_1");
     assert.equal(result.items[0]?.participantCount, 3);
     assert.equal(result.items[0]?.serverSeq, 7);
+  });
+
+  it("orders room auction bootstrap items by latest update", async () => {
+    const prisma = new FakePrisma();
+    seedSnapshotData(prisma);
+    const base = prisma.auctions.get("auction_1")!;
+    const olderUpdatedAt = new Date("2026-06-01T09:00:00.000Z");
+    const laterCreatedAt = new Date("2026-06-01T10:10:00.000Z");
+    prisma.items.set("item_2", {
+      ...makeItem(laterCreatedAt),
+      id: "item_2",
+      name: "历史压测商品"
+    });
+    prisma.rules.set("rule_2", {
+      ...makeRule(laterCreatedAt),
+      id: "rule_2"
+    });
+    prisma.auctions.set("auction_2", {
+      ...base,
+      id: "auction_2",
+      itemId: "item_2",
+      ruleId: "rule_2",
+      status: PrismaAuctionStatus.ENDED_SOLD,
+      createdAt: laterCreatedAt,
+      updatedAt: olderUpdatedAt
+    });
+    const service = new AuctionSnapshotService(prisma as unknown as PrismaService);
+
+    const result = await service.listRoomAuctions(
+      "room_1",
+      new Date("2026-06-01T10:11:00.000Z")
+    );
+
+    assert.equal(result.items.length, 2);
+    assert.equal(result.items[0]?.auctionId, "auction_1");
   });
 });
 

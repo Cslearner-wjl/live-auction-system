@@ -600,6 +600,91 @@ button {
   box-shadow: 0 16px 42px rgba(0, 0, 0, 0.36);
 }
 
+.result-layer,
+.result-scrim {
+  position: fixed;
+  inset: 0;
+}
+
+.result-layer {
+  z-index: 18;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+
+.result-scrim {
+  border: 0;
+  background: rgba(0, 0, 0, 0.54);
+}
+
+.result-modal {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: min(100%, 360px);
+  gap: 14px;
+  border-radius: 8px;
+  padding: 20px;
+  background: #18181c;
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.46);
+}
+
+.result-modal h2,
+.result-modal p {
+  margin: 0;
+}
+
+.result-modal p {
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.6;
+}
+
+.result-mark {
+  width: max-content;
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.result-mark.won {
+  background: rgba(46, 204, 154, 0.14);
+  color: #82f0c3;
+}
+
+.result-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.order-code {
+  overflow-wrap: anywhere;
+  border-radius: 8px;
+  padding: 10px;
+  background: #222226;
+  color: #ffd37d;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.result-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.secondary-button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: #2e2e33;
+  color: #fff;
+  font-weight: 900;
+}
+
 @media (max-width: 360px) {
   .live-header {
     grid-template-columns: 36px minmax(0, 1fr) auto;
