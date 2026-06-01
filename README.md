@@ -6,7 +6,7 @@
 商品上架 -> 规则配置 -> 直播间展示 -> 实时出价 -> 动态排名 -> 竞拍结束 -> 成交订单
 ```
 
-当前处于 Day 13 审查补强：服务端出价 API、Redis Lua 原子出价、幂等、封顶成交、防狙击延时、WebSocket 房间隔离、断线重连 snapshot、outbox 广播发布、移动端真实 REST / Socket.IO 竞拍联动、主播端创建商品 / 配置竞拍 / 启动 / 取消 / 查看订单闭环已落地；Day 12 已补真实 HTTP 并发压测脚本和 30/100 并发基线数据，Day 13 暂缓 AI 加成并补强 Day14 演示主链路。
+当前已完成最终部署前补强：服务端出价 API、Redis Lua 原子出价、幂等、封顶成交、防狙击延时、WebSocket 房间隔离、断线重连 snapshot、outbox claim/lease 发布、Redis/DB 对账审计、移动端真实 REST / Socket.IO 竞拍联动、主播端事务式创建商品和竞拍、启动 / 取消 / 查看订单闭环已落地。Day 12 已补真实 HTTP 30/100 并发基线数据；2026-06-01 新增 Socket.IO 连接压测脚本、生产 Docker Compose 和 CI 配置。
 
 ## 技术栈
 
@@ -118,6 +118,31 @@ pnpm perf:day12
 
 默认会创建并启动一场短期压测竞拍，发起 30 次并发出价，并校验 Redis 热状态、数据库快照、snapshot 和订单唯一性。可用 `DAY12_BID_ATTEMPTS=100 pnpm perf:day12` 跑 100 次并发出价。k6 模板入口为 `pnpm perf:day12:k6`，需要本机已安装 k6 并提供 `DAY12_AUCTION_ID`。
 
+运行 Socket.IO 连接压测：
+
+```bash
+pnpm perf:socket
+$env:SOCKET_CONNECTIONS='1000'; pnpm perf:socket; Remove-Item Env:SOCKET_CONNECTIONS
+```
+
+默认会连接 `room_1`，自动从 `GET /rooms/room_1/auctions` 选择一个竞拍，完成 `joinRoom`、`joinAuction`、`requestSnapshot` 和 `PING/PONG`。也可以设置 `SOCKET_AUCTION_ID` 固定竞拍。
+
+## 生产 Compose 演示
+
+构建并启动 MySQL、Redis、server、admin 静态站点和 mobile 静态站点：
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+默认端口：
+
+- server: `http://localhost:3000`
+- admin: `http://localhost:8080`
+- mobile: `http://localhost:8081`
+
+`docker-compose.prod.yml` 会在 server 启动前执行 Prisma migrate deploy 和 seed，适合本地一键演示。真实生产环境应改为独立迁移步骤，并替换 demo header 身份、默认数据库密码和公网 CORS 配置。
+
 ## 环境变量
 
 复制 `.env.example` 到 `.env` 后填写本地配置。真实密钥只允许放在 `.env`，不得提交。
@@ -213,7 +238,7 @@ pnpm perf:day12
 - 管理端新增“商品上架”视图，支持直接访问 `/admin/items` 和 `/admin/items/new`。
 - 商品表单支持商品名称、图片 URL、介绍和卖点标签。
 - 竞拍规则表单支持直播间 ID、0 元起拍、固定加价、竞拍时长、封顶价、防狙击窗口、延时时长和最大延时次数。
-- 管理端提交时先调用 `POST /admin/items` 创建商品，再调用 `POST /admin/auctions` 创建 `SCHEDULED` 竞拍，成功后回到竞拍列表。
+- 管理端提交时调用 `POST /admin/auctions/with-item`，后端在同一事务内创建商品、规则和 `SCHEDULED` 竞拍，成功后回到竞拍列表。
 - 前端金额按元输入，提交前转换为整数分；规则合法性继续由后端校验和状态机兜底。
 - 管理端提供轻量 SPA path 映射：`/admin/auctions`、`/admin/items/new`、`/admin/orders`。
 - 出价落库失败时会尝试 Redis 热状态安全回滚，并记录补偿审计。

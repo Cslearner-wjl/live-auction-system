@@ -1,0 +1,10 @@
+.git
+node_modules
+apps/*/dist
+packages/*/dist
+tmp
+docs/learning
+.env
+.env.*
+!.env.example
+*.log

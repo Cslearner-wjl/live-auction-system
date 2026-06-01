@@ -25,9 +25,11 @@ import { PrismaService } from "../prisma/prisma.service";
 import {
   type CancelAuctionPayload,
   type CreateAuctionPayload,
+  type CreateAuctionWithItemPayload,
   parseAuctionStatusFilter,
   parseCancelAuction,
-  parseCreateAuction
+  parseCreateAuction,
+  parseCreateAuctionWithItem
 } from "./auction.validation";
 
 type AuctionWithRelations = AuctionSession & {
@@ -114,6 +116,45 @@ export class AdminAuctionsService {
         data: {
           roomId: values.roomId,
           itemId: values.itemId,
+          ruleId: rule.id,
+          status: PrismaAuctionStatus.SCHEDULED,
+          startPriceFen: values.rule.startPriceFen,
+          currentPriceFen: values.rule.startPriceFen,
+          incrementFen: values.rule.incrementFen,
+          capPriceFen: values.rule.capPriceFen
+        },
+        include: {
+          item: true,
+          rule: true
+        }
+      });
+    });
+
+    return toAuctionDto(auction);
+  }
+
+  async createAuctionWithItem(
+    payload: CreateAuctionWithItemPayload,
+    createdById: string
+  ): Promise<AuctionDto> {
+    const values = parseCreateAuctionWithItem(payload);
+    await this.ensureRoomExists(values.roomId);
+
+    const auction = await this.prisma.$transaction(async (tx) => {
+      const item = await tx.auctionItem.create({
+        data: {
+          ...values.item,
+          createdById
+        }
+      });
+      const rule = await tx.auctionRule.create({
+        data: values.rule
+      });
+
+      return tx.auctionSession.create({
+        data: {
+          roomId: values.roomId,
+          itemId: item.id,
           ruleId: rule.id,
           status: PrismaAuctionStatus.SCHEDULED,
           startPriceFen: values.rule.startPriceFen,

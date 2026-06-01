@@ -2,12 +2,12 @@
 
 本文档用于记录难以完全自动化的演示级流程。每次完成相关功能后，在结果栏记录日期、环境和结论。
 
-当前基线：Day 12 已完成。出价 API、Redis Lua、封顶成交、防狙击延时、Socket.IO 房间隔离、outbox 广播、重连 snapshot、管理端创建商品 / 竞拍表单、管理端工作台和移动端真实 REST / Socket.IO 页面已有自动化、类型检查或构建检查；Day 12 已补真实 HTTP 30/100 并发压测和一致性校验，真实浏览器多窗口联动和 1000 Socket.IO 连接压测仍需后续补测。
+当前基线：2026-06-01 最终补强已完成。出价 API、Redis Lua、封顶成交、防狙击延时、Socket.IO 房间隔离、outbox claim/lease、重连 snapshot、Redis/DB 对账审计、管理端事务式创建商品 / 竞拍表单、管理端工作台和移动端真实 REST / Socket.IO 页面已有自动化、类型检查或构建检查；Day 12 已补真实 HTTP 30/100 并发压测和一致性校验，真实浏览器多窗口联动和 1000 Socket.IO 连接压测结果仍需后续补测。
 
 | 场景 | 前置条件 | 操作 | 预期结果 | 结果 |
 | --- | --- | --- | --- | --- |
-| 后台创建商品 | 已启动服务端，数据库已 seed `admin_1` | 在管理端“商品上架”表单填写商品名称、图片 URL、介绍和卖点，提交 | 返回 `201` 和商品 DTO，`sellingPoints` 被规范化保存；页面继续创建竞拍 | 2026-05-30：管理端页面已接入表单，`apps/admin` typecheck/build 通过；浏览器打开 `/admin/items/new` 表单渲染且无前端 error/warning；`pnpm test:e2e` 服务级闭环覆盖商品创建；真实浏览器提交待补测 |
-| 后台创建 0 元起拍竞拍 | 已有 `room_1`，管理端表单中起拍价填 `0` | 在同一表单填写固定加价、时长、封顶价、防狙击窗口、延时时长和最大延时次数，提交 | 返回 `SCHEDULED` 竞拍，`currentPriceFen` 为 `0`，列表刷新后可启动 | 2026-05-30：页面转换整数分并调用 `POST /admin/auctions`，浏览器确认 0 元起拍和延时字段可见；`pnpm test:e2e` 服务级闭环覆盖竞拍创建、启动、用户端可见和成交订单 |
+| 后台创建商品 | 已启动服务端，数据库已 seed `admin_1` | 在管理端“商品上架”表单填写商品名称、图片 URL、介绍和卖点，提交 | 调用 `POST /admin/auctions/with-item`，后端事务内创建商品、规则和竞拍 | 2026-06-01：管理端已改为组合事务接口；`pnpm --filter @live-auction/server test` 服务级闭环覆盖创建商品和竞拍；真实浏览器提交待补测 |
+| 后台创建 0 元起拍竞拍 | 已有 `room_1`，管理端表单中起拍价填 `0` | 在同一表单填写固定加价、时长、封顶价、防狙击窗口、延时时长和最大延时次数，提交 | 返回 `SCHEDULED` 竞拍，`currentPriceFen` 为 `0`，列表刷新后可启动 | 2026-06-01：页面转换整数分并调用 `POST /admin/auctions/with-item`；`pnpm --filter @live-auction/server test` 服务级闭环覆盖事务式创建、启动、用户端可见和成交订单 |
 | 后台拒绝非法规则 | 已启动服务端 | 创建竞拍时传 `incrementFen: 0` 或 `capPriceFen <= startPriceFen` | 返回 `400 VALIDATION_FAILED`，错误字段稳定 | 单元测试已覆盖核心规则，接口待测 |
 | 开拍后禁止改规则 | 已创建并启动竞拍 | 调用 `PATCH /admin/auctions/:id/rules` | 返回 `409 RULE_CANNOT_BE_CHANGED_AFTER_START` | 单元测试已覆盖核心规则，接口待测 |
 | 后台取消竞拍 | 竞拍为 `SCHEDULED` 或 `RUNNING` | 调用 `POST /admin/auctions/:id/cancel` 并填写原因 | 状态变为 `CANCELLED`，返回取消原因和时间，写入 `AUCTION_CANCELLED` outbox | 2026-05-27：状态机单元测试覆盖取消 outbox；真实接口待 Docker 环境补测 |
@@ -20,6 +20,8 @@
 | 主播取消竞拍 | 竞拍 `SCHEDULED` 或 `RUNNING` | 后台点击取消并填写原因 | 状态变为 `CANCELLED`，本进程结束 timer 被清理；广播 `AUCTION_CANCELLED` | 2026-05-31：Day 11 服务级 e2e 覆盖运行中取消、取消事件和后续出价返回已取消；真实浏览器广播待补测 |
 | 断线重连 snapshot 恢复 | 竞拍运行中且已有出价 | 断开移动端 WebSocket 后重连 | 重新拉取 snapshot，当前价、倒计时和领先状态正确 | 2026-05-31：Day 11 服务级 e2e 覆盖出价后 snapshot 当前价、最高出价人、我的排名和参与人数恢复；真实断网重连待补测 |
 | 订单唯一性 | 多用户并发冲击封顶价 | 同时提交多个达到封顶价的出价 | 仅一个最高出价人，仅一个订单 | 2026-05-25：服务端单元测试已覆盖并发封顶只接受一个出价、只创建一个订单 |
+| Redis/DB 对账审计 | 存在 Redis 热状态与 DB 竞拍快照 | 运行服务端等待对账 worker，或调用服务测试中的 `checkOnce` | 差异写入 `AUCTION_RECONCILIATION_MISMATCH` 审计，不自动改写业务状态 | 2026-06-01：`auction-consistency.service.test.ts` 覆盖无热状态不误报、热状态差异写审计；真实环境待补测 |
+| outbox 多实例发布语义 | 存在 `PENDING`、`FAILED` 或 lease 过期 `PROCESSING` 事件 | 发布器轮询并 claim 事件 | 事件成功后 `PUBLISHED`，失败后 `FAILED`，超过最大尝试进入 `DEAD_LETTER` | 2026-06-01：`auction-event-publisher.service.test.ts` 覆盖 claim/lease、失败重试和死信；多实例真实部署待补测 |
 | 用户端结果弹窗和模拟支付 | 当前用户中拍并收到 `ORDER_CREATED` | 观察移动端结果弹窗，点击“模拟支付” | 返回支付成功 toast，订单状态变为 `PAID` | 2026-05-31：真实 HTTP 已验证封顶成交后用户历史返回 `orderId`、订单详情可查、`mock-pay` 成功；浏览器打开 `http://localhost:5174/?userId=user_1&auctionId=...` 可恢复结果弹窗并显示“已完成支付” |
 
 ## Day 4 补充检查
@@ -161,6 +163,23 @@
 - 生产构建模式下的同场景压测。
 - 多轮压测平均值和机器配置补全。
 - 单竞拍出价处理队列补强后，100 并发 p95 升至约 3.52s；Day14 演示可接受，生产优化需要跨进程队列或 claim 机制。
+
+## 2026-06-01 最终补强检查
+
+已覆盖：
+
+- `BidService` 在本进程队列外增加 Redis 分布式锁，锁等待超时返回 `BID_CONCURRENCY_BUSY`。
+- `AuctionEventPublisherService` 增加 outbox claim/lease、最大尝试次数和 `DEAD_LETTER`。
+- `AuctionConsistencyService` 增加 Redis/DB 对账审计。
+- 管理端创建表单改用 `POST /admin/auctions/with-item`，避免商品孤儿记录。
+- 新增 `pnpm perf:socket` Socket.IO 连接压测脚本。
+- 新增 `docker-compose.prod.yml`、三端 Dockerfile 和 GitHub Actions CI。
+
+仍需真实环境补测：
+
+- `docker compose -f docker-compose.prod.yml up -d --build` 一键生产 compose 启动。
+- `pnpm perf:socket` 的 100 和 1000 连接真实结果。
+- 两个真实移动端窗口交替出价、断线重连和结束事件 UI 禁用。
 
 ## 记录格式
 

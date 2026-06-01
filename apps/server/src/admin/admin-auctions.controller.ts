@@ -9,14 +9,19 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards
 } from "@nestjs/common";
 import { type AuctionRulePayload } from "../auction/auction-rule.validation";
-import { AdminDemoAuthGuard } from "../common/demo-auth.guard";
+import {
+  AdminDemoAuthGuard,
+  type DemoRequest
+} from "../common/demo-auth.guard";
 import { AdminAuctionsService } from "./admin-auctions.service";
 import {
   type CancelAuctionPayload,
-  type CreateAuctionPayload
+  type CreateAuctionPayload,
+  type CreateAuctionWithItemPayload
 } from "./auction.validation";
 
 @Controller("admin/auctions")
@@ -30,6 +35,17 @@ export class AdminAuctionsController {
   @Post()
   async createAuction(@Body() body: CreateAuctionPayload) {
     return this.auctionsService.createAuction(body);
+  }
+
+  @Post("with-item")
+  async createAuctionWithItem(
+    @Body() body: CreateAuctionWithItemPayload,
+    @Req() request: DemoRequest
+  ) {
+    return this.auctionsService.createAuctionWithItem(
+      body,
+      request.demoUser?.userId ?? ""
+    );
   }
 
   @Get()

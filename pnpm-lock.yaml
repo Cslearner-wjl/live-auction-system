@@ -117,6 +117,9 @@ importers:
       prisma:
         specifier: ^7.8.0
         version: 7.8.0(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)(typescript@5.9.3)
+      socket.io-client:
+        specifier: ^4.8.3
+        version: 4.8.3
       tsx:
         specifier: ^4.20.3
         version: 4.22.3

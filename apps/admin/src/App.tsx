@@ -17,16 +17,6 @@ interface PageMeta {
   totalPages: number;
 }
 
-interface ItemDto {
-  id: string;
-  name: string;
-  imageUrl: string;
-  description: string;
-  sellingPoints: string[];
-  createdAt: string;
-  updatedAt: string;
-}
-
 interface CreateAuctionForm {
   roomId: string;
   name: string;
@@ -242,22 +232,17 @@ export function App() {
     setMessage(null);
     setMessageTone("info");
 
-    let createdItem: ItemDto | null = null;
-
     try {
       const itemPayload = toCreateItemPayload(createForm);
       const auctionPayload = toCreateAuctionPayload(createForm, "__pending_item_id__");
+      const itemName = itemPayload.name;
 
-      createdItem = await requestJson<ItemDto>("/admin/items", {
-        method: "POST",
-        body: JSON.stringify(itemPayload)
-      });
-
-      const auction = await requestJson<AuctionDto>("/admin/auctions", {
+      const auction = await requestJson<AuctionDto>("/admin/auctions/with-item", {
         method: "POST",
         body: JSON.stringify({
           ...auctionPayload,
-          itemId: createdItem.id
+          itemId: undefined,
+          item: itemPayload
         })
       });
 
@@ -269,13 +254,10 @@ export function App() {
       await refreshDashboard("ALL");
       switchView("auctions");
       setMessageTone("info");
-      setMessage(`已创建商品「${createdItem.name}」，竞拍 ${auction.id} 已进入未开始列表。`);
+      setMessage(`已创建商品「${itemName}」，竞拍 ${auction.id} 已进入未开始列表。`);
     } catch (error: unknown) {
-      const suffix = createdItem
-        ? " 商品已创建但竞拍未创建，请检查直播间和规则后重新提交。"
-        : "";
       setMessageTone("error");
-      setMessage(`${toErrorMessage(error)}${suffix}`);
+      setMessage(toErrorMessage(error));
     } finally {
       setCreateSubmitting(false);
     }

@@ -58,6 +58,13 @@ export interface AtomicBidRollbackInput {
 }
 
 export function auctionBidRedisKeys(auctionId: string, clientBidId: string) {
+  return {
+    ...auctionHotStateRedisKeys(auctionId),
+    clientBidKey: `auction:${auctionId}:client_bid:${clientBidId}`
+  };
+}
+
+export function auctionHotStateRedisKeys(auctionId: string) {
   const prefix = `auction:${auctionId}`;
 
   return {
@@ -66,8 +73,7 @@ export function auctionBidRedisKeys(auctionId: string, clientBidId: string) {
     highestBidderKey: `${prefix}:highest_bidder_id`,
     endTimeKey: `${prefix}:end_time_ms`,
     bidCountKey: `${prefix}:bid_count`,
-    leaderboardKey: `${prefix}:leaderboard`,
-    clientBidKey: `${prefix}:client_bid:${clientBidId}`
+    leaderboardKey: `${prefix}:leaderboard`
   };
 }
 

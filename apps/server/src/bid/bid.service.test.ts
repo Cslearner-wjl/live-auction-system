@@ -13,7 +13,11 @@ import {
 import { AuctionErrorCode } from "@live-auction/shared";
 import { AuctionSchedulerService } from "../auction/auction-scheduler.service";
 import { AuctionStateMachineService } from "../auction/auction-state-machine.service";
-import { RedisService } from "../cache/redis.service";
+import {
+  RedisLockTimeoutError,
+  RedisService,
+  type RedisLockOptions
+} from "../cache/redis.service";
 import { ApiException } from "../common/api-error";
 import { PrismaService } from "../prisma/prisma.service";
 import {
@@ -22,7 +26,10 @@ import {
   type AtomicBidResult,
   RedisBidAtomicStore
 } from "./bid-redis.store";
-import { BidService } from "./bid.service";
+import {
+  auctionBidLockKey,
+  BidService
+} from "./bid.service";
 
 type AuctionForBid = AuctionSession & {
   rule: AuctionRule;
@@ -425,6 +432,30 @@ class FakeRedisEval {
   }
 }
 
+class FakeRedisLock {
+  readonly calls: RedisLockOptions[] = [];
+  readonly releasedKeys: string[] = [];
+  failNextLock = false;
+
+  async withLock<T>(
+    options: RedisLockOptions,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    this.calls.push(options);
+
+    if (this.failNextLock) {
+      this.failNextLock = false;
+      throw new RedisLockTimeoutError(options.key, options.waitTimeoutMs);
+    }
+
+    try {
+      return await operation();
+    } finally {
+      this.releasedKeys.push(options.key);
+    }
+  }
+}
+
 describe("BidService.placeBid", () => {
   it("accepts a zero-start first bid and writes an outbox event", async () => {
     const { prisma, service } = makeBidService();
@@ -659,6 +690,33 @@ describe("BidService.placeBid", () => {
     assert.equal(prisma.auctions.get("auction_1")?.bidCount, 2);
   });
 
+  it("wraps accepted bid persistence in a Redis auction lock", async () => {
+    const { redisLock, service } = makeBidService();
+
+    await service.placeBid("auction_1", "user_1", {
+      amountFen: 1000,
+      clientBidId: "locked_bid"
+    });
+
+    assert.equal(redisLock.calls.length, 1);
+    assert.equal(redisLock.calls[0]?.key, auctionBidLockKey("auction_1"));
+    assert.equal(redisLock.releasedKeys[0], auctionBidLockKey("auction_1"));
+  });
+
+  it("returns a stable busy error when the Redis auction lock cannot be acquired", async () => {
+    const { redisLock, service } = makeBidService();
+    redisLock.failNextLock = true;
+
+    await assert.rejects(
+      () =>
+        service.placeBid("auction_1", "user_1", {
+          amountFen: 1000,
+          clientBidId: "lock_timeout"
+        }),
+      (error: unknown) => hasApiCode(error, AuctionErrorCode.BidConcurrencyBusy)
+    );
+  });
+
   it("rolls back a failed accepted bid before processing later bids in the same auction", async () => {
     const { atomicStore, prisma, service } = makeBidService({
       capPriceFen: 1_000_000
@@ -871,11 +929,13 @@ function makeBidService(
   prisma.auctions.set(auction.id, auction);
 
   const atomicStore = new FakeAtomicStore();
+  const redisLock = new FakeRedisLock();
   const stateMachine = new FakeStateMachine(prisma);
   const scheduler = new FakeScheduler();
   const service = new BidService(
     prisma as unknown as PrismaService,
     atomicStore as unknown as RedisBidAtomicStore,
+    redisLock as unknown as RedisService,
     stateMachine as unknown as AuctionStateMachineService,
     scheduler as unknown as AuctionSchedulerService
   );
@@ -883,6 +943,7 @@ function makeBidService(
   return {
     prisma,
     atomicStore,
+    redisLock,
     scheduler,
     service
   };

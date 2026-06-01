@@ -16,6 +16,10 @@ import {
 } from "@live-auction/shared";
 import { AuctionSchedulerService } from "../auction/auction-scheduler.service";
 import { AuctionStateMachineService } from "../auction/auction-state-machine.service";
+import {
+  RedisLockTimeoutError,
+  RedisService
+} from "../cache/redis.service";
 import { ApiException, conflict, notFound } from "../common/api-error";
 import { PrismaService } from "../prisma/prisma.service";
 import {
@@ -56,12 +60,23 @@ export interface PlaceBidResultDto {
 export class BidService {
   private readonly logger = new Logger(BidService.name);
   private readonly auctionBidQueues = new Map<string, Promise<void>>();
+  private readonly lockTtlMs = readPositiveIntEnv("BID_LOCK_TTL_MS", 15_000);
+  private readonly lockWaitTimeoutMs = readPositiveIntEnv(
+    "BID_LOCK_WAIT_TIMEOUT_MS",
+    10_000
+  );
+  private readonly lockRetryDelayMs = readPositiveIntEnv(
+    "BID_LOCK_RETRY_DELAY_MS",
+    25
+  );
 
   constructor(
     @Inject(PrismaService)
     private readonly prisma: PrismaService,
     @Inject(RedisBidAtomicStore)
     private readonly atomicStore: RedisBidAtomicStore,
+    @Inject(RedisService)
+    private readonly redis: RedisService,
     @Inject(AuctionStateMachineService)
     private readonly stateMachine: AuctionStateMachineService,
     @Inject(AuctionSchedulerService)
@@ -76,73 +91,106 @@ export class BidService {
     const input = parsePlaceBid(payload);
 
     return this.runWithAuctionBidQueue(auctionId, async () => {
-      const existingBid = await this.findExistingBid(auctionId, input.clientBidId);
+      try {
+        return await this.redis.withLock(
+          {
+            key: auctionBidLockKey(auctionId),
+            ttlMs: this.lockTtlMs,
+            waitTimeoutMs: this.lockWaitTimeoutMs,
+            retryDelayMs: this.lockRetryDelayMs
+          },
+          () => this.placeBidWithLock(auctionId, userId, input)
+        );
+      } catch (error: unknown) {
+        if (error instanceof RedisLockTimeoutError) {
+          throw new ApiException(
+            HttpStatus.SERVICE_UNAVAILABLE,
+            AuctionErrorCode.BidConcurrencyBusy,
+            "当前竞拍出价繁忙，请稍后重试",
+            {
+              auctionId,
+              lockKey: error.key,
+              waitTimeoutMs: error.waitTimeoutMs
+            }
+          );
+        }
 
-      if (existingBid) {
-        return this.toIdempotentResult(existingBid);
+        throw error;
       }
-
-      const auction = await this.getAuctionForBid(auctionId);
-      const now = new Date();
-      assertAuctionCanReceiveBid(auction, now);
-
-      const atomicResult = await this.atomicStore.placeBid({
-        auction,
-        userId,
-        amountFen: input.amountFen,
-        clientBidId: input.clientBidId,
-        now
-      });
-
-      if (!atomicResult.accepted) {
-        throwAtomicRejection(atomicResult, input.clientBidId);
-      }
-
-      const acceptedBid = await this.persistAcceptedBid({
-        auction,
-        userId,
-        clientBidId: input.clientBidId,
-        now,
-        atomic: atomicResult
-      });
-
-      let finalAuction = acceptedBid.auction;
-      let orderId = finalAuction.order?.id;
-
-      if (atomicResult.reachedCapPrice) {
-        const settled = await this.stateMachine.settleSoldAuction(auctionId, {
-          enforceEndTime: false
-        });
-        this.scheduler.clearEndTimer(auctionId);
-        finalAuction = {
-          ...settled.auction,
-          rule: auction.rule,
-          order: settled.order
-        };
-        orderId = settled.order?.id;
-      } else if (atomicResult.extended) {
-        this.scheduler.scheduleEndTimer(acceptedBid.auction);
-      }
-
-      return {
-        accepted: true,
-        auctionId,
-        bidId: acceptedBid.bid.id,
-        amountFen: acceptedBid.bid.amountFen,
-        currentPriceFen: finalAuction.currentPriceFen,
-        previousPriceFen: atomicResult.previousPriceFen,
-        previousHighestBidderId: atomicResult.previousHighestBidderId,
-        highestBidderId: finalAuction.highestBidderId,
-        bidCount: finalAuction.bidCount,
-        serverSeq: acceptedBid.bid.serverSeq,
-        extended: atomicResult.extended,
-        endTime: finalAuction.endTime?.toISOString() ?? null,
-        reachedCapPrice: atomicResult.reachedCapPrice,
-        status: finalAuction.status as AuctionStatus,
-        orderId,
-        idempotent: false
-      };
     });
+  }
+
+  private async placeBidWithLock(
+    auctionId: string,
+    userId: string,
+    input: ReturnType<typeof parsePlaceBid>
+  ): Promise<PlaceBidResultDto> {
+    const existingBid = await this.findExistingBid(auctionId, input.clientBidId);
+
+    if (existingBid) {
+      return this.toIdempotentResult(existingBid);
+    }
+
+    const auction = await this.getAuctionForBid(auctionId);
+    const now = new Date();
+    assertAuctionCanReceiveBid(auction, now);
+
+    const atomicResult = await this.atomicStore.placeBid({
+      auction,
+      userId,
+      amountFen: input.amountFen,
+      clientBidId: input.clientBidId,
+      now
+    });
+
+    if (!atomicResult.accepted) {
+      throwAtomicRejection(atomicResult, input.clientBidId);
+    }
+
+    const acceptedBid = await this.persistAcceptedBid({
+      auction,
+      userId,
+      clientBidId: input.clientBidId,
+      now,
+      atomic: atomicResult
+    });
+
+    let finalAuction = acceptedBid.auction;
+    let orderId = finalAuction.order?.id;
+
+    if (atomicResult.reachedCapPrice) {
+      const settled = await this.stateMachine.settleSoldAuction(auctionId, {
+        enforceEndTime: false
+      });
+      this.scheduler.clearEndTimer(auctionId);
+      finalAuction = {
+        ...settled.auction,
+        rule: auction.rule,
+        order: settled.order
+      };
+      orderId = settled.order?.id;
+    } else if (atomicResult.extended) {
+      this.scheduler.scheduleEndTimer(acceptedBid.auction);
+    }
+
+    return {
+      accepted: true,
+      auctionId,
+      bidId: acceptedBid.bid.id,
+      amountFen: acceptedBid.bid.amountFen,
+      currentPriceFen: finalAuction.currentPriceFen,
+      previousPriceFen: atomicResult.previousPriceFen,
+      previousHighestBidderId: atomicResult.previousHighestBidderId,
+      highestBidderId: finalAuction.highestBidderId,
+      bidCount: finalAuction.bidCount,
+      serverSeq: acceptedBid.bid.serverSeq,
+      extended: atomicResult.extended,
+      endTime: finalAuction.endTime?.toISOString() ?? null,
+      reachedCapPrice: atomicResult.reachedCapPrice,
+      status: finalAuction.status as AuctionStatus,
+      orderId,
+      idempotent: false
+    };
   }
 
   private async runWithAuctionBidQueue<T>(
@@ -487,4 +535,18 @@ function isPrismaUniqueConstraintError(error: unknown): boolean {
     "code" in error &&
     (error as { code?: unknown }).code === "P2002"
   );
+}
+
+export function auctionBidLockKey(auctionId: string): string {
+  return `auction:${auctionId}:bid_lock`;
+}
+
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
 }

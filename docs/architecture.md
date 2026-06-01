@@ -35,6 +35,7 @@ apps/server
   - BidService
   - AuctionSnapshotService
   - AuctionEventPublisherService
+  - AuctionConsistencyService
   - OrderService
   - Socket.IO WebSocket Gateway
   - AuctionScheduler
@@ -110,17 +111,18 @@ Day 12 当前实现状态：
 - `BidService` 已实现 `POST /auctions/:auctionId/bids`，Redis 热状态在首次出价时按 DB 快照惰性初始化。
 - 出价成功后已写 `Bid`、更新 `AuctionSession`，并写 `AuctionEvent(BID_ACCEPTED, outboxStatus=PENDING)`。
 - Redis accepted 但 DB 写失败时会尝试按最新 `serverSeq` 安全回滚 Redis 热状态，记录 `AuditLog(DB_WRITE_FAILED_AFTER_REDIS_ACCEPTED)` 并返回 `BID_PERSISTENCE_FAILED`。
-- 同一竞拍的幂等检查、Redis Lua 和 DB 持久化在当前单进程内按 `auctionId` 串行处理，保证失败 accepted bid 可先回滚，再处理后续请求；多实例部署仍需替换为跨进程队列、claim 或分布式锁。
+- 同一竞拍的幂等检查、Redis Lua 和 DB 持久化先进入当前进程内 `auctionId` 级队列，再获取 Redis 分布式锁 `auction:{auctionId}:bid_lock`，保证多实例下失败 accepted bid 可先回滚，再处理后续请求。
 - `AuctionSnapshotService` 已提供房间竞拍列表、竞拍详情和重连 snapshot。
 - `AuctionRealtimeGateway` 已支持 `user:{userId}`、`room:{roomId}`、`auction:{auctionId}` 房间加入、snapshot 请求、Socket.IO 出价和心跳。
-- `AuctionEventPublisherService` 已从 DB outbox 发布 WebSocket 事件，并在成功后标记 `PUBLISHED`，失败时标记 `FAILED` 并写审计日志；后续轮询会重试 `FAILED` 事件。
+- `AuctionEventPublisherService` 已从 DB outbox claim 事件后发布 WebSocket 事件，并在成功后标记 `PUBLISHED`；失败时释放 claim，标记 `FAILED` 或 `DEAD_LETTER` 并写审计日志；lease 过期的 `PROCESSING` 事件可被其他实例重试。
+- `AuctionConsistencyService` 已周期扫描 Redis 热状态和 DB `AuctionSession`，发现 `status`、当前价、最高出价人、结束时间、出价数、延时次数、`serverSeq` 或排行榜数量差异时写审计日志；当前不自动修复。
 - Day 12 已通过真实 HTTP + MySQL + Redis 压测覆盖 30/100 并发出价，并在压测中修复 Redis Lua payload 解析和 DB 持久化顺序问题。
-- Redis/DB 自动对账仍未落地，后续实现必须继续向上述目标数据流收敛。
+- Redis/DB 对账目前是检测和审计能力；自动修复仍需单独设计人工确认或 repair 命令。
 
 Day 10 管理端实现状态：
 
 - `apps/admin` 已接入管理端 API，提供商品上架、竞拍规则配置、竞拍列表、状态筛选、启动 / 取消操作和订单列表。
-- 管理端创建页通过 `POST /admin/items` 创建商品，再通过 `POST /admin/auctions` 创建 `SCHEDULED` 竞拍；成功后刷新竞拍列表。
+- 管理端创建页通过 `POST /admin/auctions/with-item` 在后端事务内创建商品、规则和 `SCHEDULED` 竞拍；单独的商品和竞拍接口仍保留。
 - 管理端页面只消费 API 状态，不实现竞拍状态机；规则合法性、启动和取消合法性仍由后端校验和状态机兜底。
 - 管理端 API DTO 已补充商品标签、商品图、买家脱敏名和竞拍状态等展示字段。
 - 管理端路由采用轻量 SPA path 映射：`/admin/auctions`、`/admin/items/new`、`/admin/orders`；生产部署需要 fallback 到同一个前端入口。

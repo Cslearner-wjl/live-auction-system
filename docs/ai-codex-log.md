@@ -275,3 +275,15 @@
 | human-reviewed decisions | 不把当前单进程队列、demo 身份、未执行的 1000 Socket.IO 压测描述为生产化完成；按演示可用和生产化可部署两个口径分别评估距离 |
 | tests run | `pnpm --filter @live-auction/server test`、`pnpm typecheck`、`pnpm test`、`pnpm test:e2e`、`pnpm lint`、`pnpm build`、`git diff --check`、secrets 关键词扫描、确认 `docs/learning/` 未进入 Git 状态 |
 | known issues | 多实例出价顺序、Redis/DB 自动对账、outbox claim/死信、1000 Socket.IO 压测、真实认证和生产部署流水线仍是最终可部署前的主要缺口 |
+
+## 2026-06-01
+
+| 字段 | 内容 |
+| --- | --- |
+| task | 根据最终部署计划完成最后项目任务 |
+| prompt summary | 用户要求按 `docs/final-deployment-plan.md` 完成最后的项目任务 |
+| files changed | `packages/shared/src/error-codes.ts`、`apps/server/src/cache/redis.service.ts`、`apps/server/src/bid/*`、`apps/server/src/realtime/*`、`apps/server/src/auction/*`、`apps/server/src/admin/*`、`apps/server/prisma/schema.prisma`、新增 Prisma migration、`apps/server/src/performance/day12-socket-load.ts`、`apps/admin/src/App.tsx`、三端 Dockerfile、`docker-compose.prod.yml`、`.github/workflows/ci.yml`、`README.md`、`docs/*`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | Redis 分布式出价锁、锁超时错误码、outbox claim/lease/死信、Redis/DB 对账审计 worker、事务式商品+竞拍创建接口、Socket.IO 连接压测脚本、生产 compose/Docker/CI、相关测试和文档同步 |
+| human-reviewed decisions | 对账 worker 只检测和写审计，不自动修复价格、赢家、订单；出价锁先用 Redis lock 覆盖多实例关键段，后续高吞吐再评估 Stream/BullMQ/DB claim；生产 compose 可用于本地演示，真实生产迁移和 seed 应拆成独立 SOP；Socket.IO 脚本新增但不把未执行的 100/1000 结果写成完成 |
+| tests run | `pnpm install --lockfile-only`、`pnpm install`、`pnpm --filter @live-auction/server prisma:generate`、`pnpm --filter @live-auction/shared build`、`pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/server test`、`pnpm typecheck`、`pnpm test`、`pnpm test:e2e`、`pnpm lint`、`pnpm build`、`docker compose -f docker-compose.prod.yml config`、`git diff --check`、secrets 关键词扫描、确认 `docs/learning/` 仍为 ignored |
+| known issues | 生产 compose 尚未实际 build/up，Socket.IO 100/1000 真实压测和浏览器双窗口/断网重连最终手测仍需后续记录；真实认证、限流、Playwright 全链路和自动修复型对账仍未实现 |

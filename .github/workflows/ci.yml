@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root_change_me
+          MYSQL_DATABASE: live_auction
+          MYSQL_USER: auction
+          MYSQL_PASSWORD: change_me
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -u auction -pchange_me --silent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: mysql://auction:change_me@127.0.0.1:3307/live_auction
+      REDIS_URL: redis://127.0.0.1:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter @live-auction/server prisma:generate
+
+      - run: pnpm typecheck
+
+      - run: pnpm test
+
+      - run: pnpm test:e2e
+
+      - run: pnpm lint
+
+      - run: pnpm build
+
+      - run: docker compose -f docker-compose.prod.yml build

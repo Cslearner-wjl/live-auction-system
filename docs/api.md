@@ -242,6 +242,7 @@ X-Demo-Role: admin
 - `GET /admin/items/:itemId`
 - `PATCH /admin/items/:itemId`
 - `POST /admin/auctions`
+- `POST /admin/auctions/with-item`
 - `GET /admin/auctions`
 - `GET /admin/auctions/:auctionId`
 - `PATCH /admin/auctions/:auctionId/rules`
@@ -259,7 +260,7 @@ X-Demo-Role: admin
 
 AI 卖点接口尚未实现；订单由状态机结算流程生成，并可通过管理端订单接口和用户订单接口查询。
 
-Day 10 管理端页面已接入上述商品和竞拍接口：`/admin/items/new` 表单会先调用 `POST /admin/items`，再用返回的 `itemId` 调用 `POST /admin/auctions` 创建 `SCHEDULED` 竞拍。该页面不新增 REST 契约；规则校验、状态流转和错误码仍以后端响应为准。
+2026-06-01 管理端创建页已改为调用 `POST /admin/auctions/with-item`，由后端在同一事务内创建商品、规则和 `SCHEDULED` 竞拍，避免前端串联两个接口时出现“商品已创建但竞拍创建失败”的孤儿商品。单独的 `POST /admin/items` 和 `POST /admin/auctions` 仍保留给独立管理场景。
 
 ### POST /admin/items
 
@@ -443,6 +444,38 @@ curl -X POST http://localhost:3000/admin/auctions \
   -H "X-Demo-User-Id: admin_1" \
   -H "X-Demo-Role: admin" \
   -d "{\"roomId\":\"room_1\",\"itemId\":\"item_1\",\"startPriceFen\":0,\"incrementFen\":1000,\"durationSeconds\":300,\"capPriceFen\":100000,\"antiSnipingWindowSeconds\":10,\"extensionSeconds\":15,\"maxExtensionCount\":3}"
+```
+
+### POST /admin/auctions/with-item
+
+事务内创建商品、竞拍规则和竞拍会话。用于管理端“商品上架”表单，成功后返回 `SCHEDULED` Auction DTO，并包含 `item` 和 `rule` 摘要。
+
+Request DTO：
+
+| 字段 | 类型 | 必填 | 校验 |
+| --- | --- | --- | --- |
+| `roomId` | string | 是 | 房间必须存在 |
+| `item` | object | 是 | 同 `POST /admin/items` 的商品字段 |
+| `startPriceFen` | integer | 是 | 大于等于 `0` |
+| `incrementFen` | integer | 是 | 大于 `0` |
+| `durationSeconds` | integer | 是 | 大于 `0` |
+| `capPriceFen` | integer | 是 | 大于 `startPriceFen` |
+| `antiSnipingWindowSeconds` | integer | 是 | 大于等于 `0` |
+| `extensionSeconds` | integer | 是 | 大于等于 `0` |
+| `maxExtensionCount` | integer | 否 | 大于等于 `0` |
+
+201：返回 Auction DTO。
+
+错误：`400 VALIDATION_FAILED`、`401 UNAUTHORIZED`、`403 FORBIDDEN`、`404 ROOM_NOT_FOUND`。
+
+curl：
+
+```bash
+curl -X POST http://localhost:3000/admin/auctions/with-item \
+  -H "Content-Type: application/json" \
+  -H "X-Demo-User-Id: admin_1" \
+  -H "X-Demo-Role: admin" \
+  -d "{\"roomId\":\"room_1\",\"item\":{\"name\":\"翡翠手镯\",\"imageUrl\":\"https://example.com/item.png\",\"description\":\"天然翡翠手镯\",\"sellingPoints\":[\"支持鉴定\",\"包邮\"]},\"startPriceFen\":0,\"incrementFen\":1000,\"durationSeconds\":300,\"capPriceFen\":100000,\"antiSnipingWindowSeconds\":10,\"extensionSeconds\":15,\"maxExtensionCount\":3}"
 ```
 
 ### GET /admin/auctions
@@ -891,7 +924,7 @@ Request DTO：
 
 重复提交已落库的 `auctionId + clientBidId` 时返回原 Bid 结果，并标记 `idempotent: true`；如果并发重复请求命中 Redis 热幂等键但 DB 尚未提交，可能返回 `409 DUPLICATE_CLIENT_BID`，客户端应拉取 snapshot 或稍后重试同一个 `clientBidId`。
 
-错误：`400 VALIDATION_FAILED`、`401 UNAUTHORIZED`、`403 FORBIDDEN`、`404 AUCTION_NOT_FOUND`、`409 AUCTION_NOT_RUNNING`、`409 AUCTION_ALREADY_ENDED`、`409 AUCTION_CANCELLED`、`409 BID_AMOUNT_TOO_LOW`、`409 BID_INCREMENT_INVALID`、`409 BID_EXCEEDS_CAP_PRICE`、`409 BIDDER_ALREADY_LEADING`、`409 DUPLICATE_CLIENT_BID`、`503 BID_PERSISTENCE_FAILED`。
+错误：`400 VALIDATION_FAILED`、`401 UNAUTHORIZED`、`403 FORBIDDEN`、`404 AUCTION_NOT_FOUND`、`409 AUCTION_NOT_RUNNING`、`409 AUCTION_ALREADY_ENDED`、`409 AUCTION_CANCELLED`、`409 BID_AMOUNT_TOO_LOW`、`409 BID_INCREMENT_INVALID`、`409 BID_EXCEEDS_CAP_PRICE`、`409 BIDDER_ALREADY_LEADING`、`409 DUPLICATE_CLIENT_BID`、`503 BID_CONCURRENCY_BUSY`、`503 BID_PERSISTENCE_FAILED`。
 
 curl：
 

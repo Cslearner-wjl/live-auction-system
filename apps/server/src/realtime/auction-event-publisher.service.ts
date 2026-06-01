@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import {
   AuctionEventType as PrismaAuctionEventType,
@@ -17,6 +18,15 @@ type JsonObject = Record<string, unknown>;
 @Injectable()
 export class AuctionEventPublisherService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(AuctionEventPublisherService.name);
+  private readonly workerId = readStringEnv(
+    "OUTBOX_WORKER_ID",
+    `outbox-${randomUUID()}`
+  ).slice(0, 80);
+  private readonly claimLeaseMs = readPositiveIntEnv("OUTBOX_CLAIM_LEASE_MS", 30_000);
+  private readonly maxPublishAttempts = readPositiveIntEnv(
+    "OUTBOX_MAX_PUBLISH_ATTEMPTS",
+    5
+  );
   private timer: PublishTimer | null = null;
   private isPublishing = false;
 
@@ -42,35 +52,14 @@ export class AuctionEventPublisherService implements OnModuleInit, OnModuleDestr
   }
 
   async publishPendingOnce(limit = 50): Promise<{ published: number; failed: number }> {
-    const events = await this.prisma.auctionEvent.findMany({
-      where: {
-        outboxStatus: {
-          in: [PrismaOutboxStatus.PENDING, PrismaOutboxStatus.FAILED]
-        }
-      },
-      orderBy: {
-        createdAt: "asc"
-      },
-      take: limit
-    });
+    const events = await this.claimPendingEvents(limit);
     let published = 0;
     let failed = 0;
 
     for (const event of events) {
       try {
         await this.publishEvent(event);
-        await this.prisma.auctionEvent.updateMany({
-          where: {
-            id: event.id,
-            outboxStatus: {
-              in: [PrismaOutboxStatus.PENDING, PrismaOutboxStatus.FAILED]
-            }
-          },
-          data: {
-            outboxStatus: PrismaOutboxStatus.PUBLISHED,
-            publishedAt: new Date()
-          }
-        });
+        await this.markPublished(event);
         published += 1;
       } catch (error: unknown) {
         failed += 1;
@@ -96,6 +85,89 @@ export class AuctionEventPublisherService implements OnModuleInit, OnModuleDestr
     } finally {
       this.isPublishing = false;
     }
+  }
+
+  private async claimPendingEvents(limit: number): Promise<AuctionEvent[]> {
+    const now = new Date();
+    const claimedUntil = new Date(now.getTime() + this.claimLeaseMs);
+    const candidates = await this.prisma.auctionEvent.findMany({
+      where: this.claimableWhere(now),
+      orderBy: {
+        createdAt: "asc"
+      },
+      take: limit
+    });
+    const claimed: AuctionEvent[] = [];
+
+    for (const event of candidates) {
+      const updated = await this.prisma.auctionEvent.updateMany({
+        where: {
+          id: event.id,
+          ...this.claimableWhere(now)
+        },
+        data: {
+          outboxStatus: PrismaOutboxStatus.PROCESSING,
+          publishClaimedBy: this.workerId,
+          publishClaimedUntil: claimedUntil,
+          publishAttemptCount: {
+            increment: 1
+          },
+          lastPublishError: null
+        }
+      });
+
+      if (updated.count === 1) {
+        claimed.push({
+          ...event,
+          outboxStatus: PrismaOutboxStatus.PROCESSING,
+          publishClaimedBy: this.workerId,
+          publishClaimedUntil: claimedUntil,
+          publishAttemptCount: event.publishAttemptCount + 1,
+          lastPublishError: null
+        });
+      }
+    }
+
+    return claimed;
+  }
+
+  private claimableWhere(now: Date) {
+    return {
+      OR: [
+        {
+          outboxStatus: PrismaOutboxStatus.PENDING
+        },
+        {
+          outboxStatus: PrismaOutboxStatus.FAILED,
+          publishAttemptCount: {
+            lt: this.maxPublishAttempts
+          }
+        },
+        {
+          outboxStatus: PrismaOutboxStatus.PROCESSING,
+          publishClaimedUntil: {
+            lt: now
+          }
+        }
+      ]
+    };
+  }
+
+  private async markPublished(event: AuctionEvent): Promise<void> {
+    await this.prisma.auctionEvent.updateMany({
+      where: {
+        id: event.id,
+        outboxStatus: PrismaOutboxStatus.PROCESSING,
+        publishClaimedBy: this.workerId
+      },
+      data: {
+        outboxStatus: PrismaOutboxStatus.PUBLISHED,
+        publishClaimedBy: null,
+        publishClaimedUntil: null,
+        lastPublishError: null,
+        publishedAt: new Date()
+      }
+    });
   }
 
   async publishEvent(event: AuctionEvent): Promise<void> {
@@ -244,10 +316,26 @@ export class AuctionEventPublisherService implements OnModuleInit, OnModuleDestr
   }
 
   private async markFailed(event: AuctionEvent, error: unknown): Promise<void> {
-    await this.prisma.auctionEvent.update({
-      where: { id: event.id },
+    const nextStatus =
+      event.publishAttemptCount >= this.maxPublishAttempts
+        ? PrismaOutboxStatus.DEAD_LETTER
+        : PrismaOutboxStatus.FAILED;
+    const errorMessage = truncate(
+      error instanceof Error ? error.message : String(error),
+      500
+    );
+
+    await this.prisma.auctionEvent.updateMany({
+      where: {
+        id: event.id,
+        outboxStatus: PrismaOutboxStatus.PROCESSING,
+        publishClaimedBy: this.workerId
+      },
       data: {
-        outboxStatus: PrismaOutboxStatus.FAILED
+        outboxStatus: nextStatus,
+        publishClaimedBy: null,
+        publishClaimedUntil: null,
+        lastPublishError: errorMessage
       }
     });
 
@@ -261,7 +349,9 @@ export class AuctionEventPublisherService implements OnModuleInit, OnModuleDestr
           metadata: {
             type: event.type,
             serverSeq: event.serverSeq,
-            error: error instanceof Error ? error.message : String(error)
+            publishAttemptCount: event.publishAttemptCount,
+            nextOutboxStatus: nextStatus,
+            error: errorMessage
           }
         }
       });
@@ -300,4 +390,22 @@ function readOptionalString(value: unknown): string | null {
 
 function readOptionalNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readStringEnv(name: string, fallback: string): string {
+  return process.env[name]?.trim() || fallback;
+}
+
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) {
+    return fallback;
+  }
+
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function truncate(value: string, maxLength: number): string {
+  return value.length <= maxLength ? value : value.slice(0, maxLength);
 }

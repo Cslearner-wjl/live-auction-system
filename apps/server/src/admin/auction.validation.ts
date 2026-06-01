@@ -5,16 +5,32 @@ import {
   parseCreateAuctionRule
 } from "../auction/auction-rule.validation";
 import { validationFailed } from "../common/api-error";
-import { readRequiredString } from "./item.validation";
+import {
+  type ItemPayload,
+  type ItemValues,
+  parseCreateItem,
+  readRequiredString
+} from "./item.validation";
 
 export interface CreateAuctionPayload extends AuctionRulePayload {
   roomId?: unknown;
   itemId?: unknown;
 }
 
+export interface CreateAuctionWithItemPayload extends AuctionRulePayload {
+  roomId?: unknown;
+  item?: unknown;
+}
+
 export interface CreateAuctionValues {
   roomId: string;
   itemId: string;
+  rule: AuctionRuleValues;
+}
+
+export interface CreateAuctionWithItemValues {
+  roomId: string;
+  item: ItemValues;
   rule: AuctionRuleValues;
 }
 
@@ -26,6 +42,20 @@ export function parseCreateAuction(payload: CreateAuctionPayload): CreateAuction
   return {
     roomId: readRequiredString(payload.roomId, "roomId", 191),
     itemId: readRequiredString(payload.itemId, "itemId", 191),
+    rule: parseCreateAuctionRule(payload)
+  };
+}
+
+export function parseCreateAuctionWithItem(
+  payload: CreateAuctionWithItemPayload
+): CreateAuctionWithItemValues {
+  if (typeof payload.item !== "object" || payload.item === null || Array.isArray(payload.item)) {
+    throw validationFailed("item", "must be an object");
+  }
+
+  return {
+    roomId: readRequiredString(payload.roomId, "roomId", 191),
+    item: parseCreateItem(payload.item as ItemPayload),
     rule: parseCreateAuctionRule(payload)
   };
 }

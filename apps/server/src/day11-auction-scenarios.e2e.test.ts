@@ -29,6 +29,7 @@ import {
   type AtomicBidRollbackInput,
   RedisBidAtomicStore
 } from "./bid/bid-redis.store";
+import { RedisService } from "./cache/redis.service";
 import { ApiException } from "./common/api-error";
 import { PrismaService } from "./prisma/prisma.service";
 import { AuctionSnapshotService } from "./realtime/auction-snapshot.service";
@@ -235,6 +236,7 @@ function makeHarness() {
   const bids = new BidService(
     prisma as unknown as PrismaService,
     new Day11AtomicStore() as unknown as RedisBidAtomicStore,
+    new Day11RedisLock() as unknown as RedisService,
     stateMachine,
     scheduler as unknown as AuctionSchedulerService
   );
@@ -674,6 +676,15 @@ class Day11Prisma {
     }
 
     return operation(this);
+  }
+}
+
+class Day11RedisLock {
+  async withLock<T>(
+    _options: unknown,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    return operation();
   }
 }
 

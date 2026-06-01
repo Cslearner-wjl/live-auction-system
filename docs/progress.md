@@ -228,6 +228,23 @@ Day 14 前继续：
 - 最新代码下重跑 `pnpm perf:day12` 30/100 并发压测并更新性能报告。
 - 根据最终录屏流程修正文档和演示脚本。
 
+## 2026-06-01 最终补强
+
+- `BidService` 在本进程 `auctionId` 队列外增加 Redis 分布式锁 `auction:{auctionId}:bid_lock`，锁带 TTL、自动续期和等待超时错误码 `BID_CONCURRENCY_BUSY`。
+- `AuctionEventPublisherService` 从简单轮询升级为 outbox claim/lease：新增 `PROCESSING`、`DEAD_LETTER`、claim worker、lease 过期时间、发布尝试次数和最近错误。
+- 新增 `AuctionConsistencyService`，周期比对 Redis 热状态和 DB `AuctionSession`，差异写 `AUCTION_RECONCILIATION_MISMATCH` 审计。
+- 新增 `POST /admin/auctions/with-item`，后端事务内创建商品、规则和竞拍；管理端创建页已改用该接口，避免孤儿商品。
+- 新增 `pnpm perf:socket`，用于 Socket.IO 批量连接、加入房间、请求 snapshot 和 PING/PONG 验证。
+- 新增 server/admin/mobile Dockerfile、`docker-compose.prod.yml` 和 GitHub Actions CI。
+- 更新 API、数据库 schema、一致性、性能、手测、最终部署计划、AI 日志和本地学习文档。
+
+仍需后续真实环境验收：
+
+- 新机器或干净 Docker 环境执行 `docker compose -f docker-compose.prod.yml up -d --build`。
+- 记录 `pnpm perf:socket` 的 100 和 1000 连接结果。
+- 完成浏览器双窗口交替出价、断线重连和结束事件 UI 禁用手测。
+- 补真实认证、限流、Playwright 全链路和对账 repair SOP。
+
 ## 文档维护规则
 
 - `README.md` 只保留快速启动、当前阶段和核心入口。

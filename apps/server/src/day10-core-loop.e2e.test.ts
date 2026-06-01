@@ -18,7 +18,6 @@ import {
 } from "@prisma/client";
 import { AuctionStatus, AuctionWebSocketEvent } from "@live-auction/shared";
 import { AdminAuctionsService } from "./admin/admin-auctions.service";
-import { AdminItemsService } from "./admin/admin-items.service";
 import { AdminOrdersService } from "./admin/admin-orders.service";
 import { AuctionSchedulerService } from "./auction/auction-scheduler.service";
 import { AuctionStateMachineService } from "./auction/auction-state-machine.service";
@@ -29,6 +28,7 @@ import {
   type AtomicBidRollbackInput,
   RedisBidAtomicStore
 } from "./bid/bid-redis.store";
+import { RedisService } from "./cache/redis.service";
 import { PrismaService } from "./prisma/prisma.service";
 import { AuctionSnapshotService } from "./realtime/auction-snapshot.service";
 
@@ -39,7 +39,6 @@ describe("Day 10 core auction loop", () => {
     const prisma = new Day10Prisma();
     const stateMachine = new AuctionStateMachineService(prisma as unknown as PrismaService);
     const scheduler = new Day10Scheduler();
-    const items = new AdminItemsService(prisma as unknown as PrismaService);
     const auctions = new AdminAuctionsService(
       prisma as unknown as PrismaService,
       stateMachine,
@@ -48,35 +47,36 @@ describe("Day 10 core auction loop", () => {
     const bids = new BidService(
       prisma as unknown as PrismaService,
       new Day10AtomicStore() as unknown as RedisBidAtomicStore,
+      new Day10RedisLock() as unknown as RedisService,
       stateMachine,
       scheduler as unknown as AuctionSchedulerService
     );
     const snapshots = new AuctionSnapshotService(prisma as unknown as PrismaService);
     const orders = new AdminOrdersService(prisma as unknown as PrismaService);
 
-    const item = await items.createItem(
+    const scheduled = await auctions.createAuctionWithItem(
       {
-        name: "Day10 闭环手镯",
-        imageUrl: "https://example.com/day10.png",
-        description: "用于 Day10 核心闭环自动化验证",
-        sellingPoints: ["0元起拍", "支持鉴定"]
+        roomId: "room_1",
+        item: {
+          name: "Day10 闭环手镯",
+          imageUrl: "https://example.com/day10.png",
+          description: "用于 Day10 核心闭环自动化验证",
+          sellingPoints: ["0元起拍", "支持鉴定"]
+        },
+        startPriceFen: 0,
+        incrementFen: 1000,
+        durationSeconds: 60,
+        capPriceFen: 1000,
+        antiSnipingWindowSeconds: 10,
+        extensionSeconds: 15,
+        maxExtensionCount: 2
       },
       "admin_1"
     );
-    const scheduled = await auctions.createAuction({
-      roomId: "room_1",
-      itemId: item.id,
-      startPriceFen: 0,
-      incrementFen: 1000,
-      durationSeconds: 60,
-      capPriceFen: 1000,
-      antiSnipingWindowSeconds: 10,
-      extensionSeconds: 15,
-      maxExtensionCount: 2
-    });
 
     assert.equal(scheduled.status, AuctionStatus.Scheduled);
     assert.equal(scheduled.currentPriceFen, 0);
+    assert.equal(prisma.items.size, 1);
 
     const running = await auctions.startAuction(scheduled.id);
     const roomAuctions = await snapshots.listRoomAuctions("room_1");
@@ -428,6 +428,15 @@ class Day10Prisma {
     }
 
     return operation(this);
+  }
+}
+
+class Day10RedisLock {
+  async withLock<T>(
+    _options: unknown,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    return operation();
   }
 }
 

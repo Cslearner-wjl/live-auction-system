@@ -139,6 +139,10 @@ class FakePrisma {
         serverSeq: data.serverSeq,
         payload: data.payload as never,
         outboxStatus: data.outboxStatus,
+        publishAttemptCount: 0,
+        publishClaimedBy: null,
+        publishClaimedUntil: null,
+        lastPublishError: null,
         publishedAt: null,
         createdAt: new Date("2026-06-01T10:00:01.000Z")
       };

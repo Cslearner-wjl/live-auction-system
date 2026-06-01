@@ -1,0 +1,108 @@
+name: live-auction-prod
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_change_me}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-live_auction}
+      MYSQL_USER: ${MYSQL_USER:-auction}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-change_me}
+      TZ: Asia/Shanghai
+    ports:
+      - "${MYSQL_PORT:-3307}:3306"
+    command:
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+      - "--default-authentication-plugin=mysql_native_password"
+    volumes:
+      - mysql80-prod-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u ${MYSQL_USER:-auction} -p${MYSQL_PASSWORD:-change_me} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-prod-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: 3000
+      DATABASE_URL: mysql://${MYSQL_USER:-auction}:${MYSQL_PASSWORD:-change_me}@mysql:3306/${MYSQL_DATABASE:-live_auction}
+      REDIS_URL: redis://redis:6379
+      ADMIN_WEB_URL: ${PROD_ADMIN_WEB_URL:-http://localhost:8080}
+      MOBILE_WEB_URL: ${PROD_MOBILE_WEB_URL:-http://localhost:8081}
+      AUCTION_CONSISTENCY_WORKER_ENABLED: ${AUCTION_CONSISTENCY_WORKER_ENABLED:-true}
+    ports:
+      - "${SERVER_PORT:-3000}:3000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >
+      sh -c "pnpm --filter @live-auction/server exec prisma migrate deploy --schema prisma/schema.prisma
+      && pnpm --filter @live-auction/server exec prisma db seed --schema prisma/schema.prisma
+      && node apps/server/dist/main.js"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  admin:
+    build:
+      context: .
+      dockerfile: apps/admin/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:3000}
+    restart: unless-stopped
+    ports:
+      - "${ADMIN_PORT:-8080}:80"
+    depends_on:
+      server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mobile:
+    build:
+      context: .
+      dockerfile: apps/mobile/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:3000}
+    restart: unless-stopped
+    ports:
+      - "${MOBILE_PORT:-8081}:80"
+    depends_on:
+      server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysql80-prod-data:
+  redis-prod-data:

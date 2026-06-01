@@ -17,6 +17,24 @@ interface Emission {
   payload: Record<string, unknown>;
 }
 
+interface OutboxWhere {
+  id?: string;
+  outboxStatus?: PrismaOutboxStatus | { in: PrismaOutboxStatus[] };
+  publishAttemptCount?: { lt: number };
+  publishClaimedBy?: string | null;
+  publishClaimedUntil?: { lt: Date } | null;
+  OR?: OutboxWhere[];
+}
+
+interface AuctionEventUpdateData {
+  outboxStatus?: PrismaOutboxStatus;
+  publishAttemptCount?: { increment: number };
+  publishClaimedBy?: string | null;
+  publishClaimedUntil?: Date | null;
+  lastPublishError?: string | null;
+  publishedAt?: Date;
+}
+
 class FakeGateway {
   readonly emissions: Emission[] = [];
 
@@ -81,30 +99,48 @@ class FakePrisma {
       where,
       take
     }: {
-      where: { outboxStatus: PrismaOutboxStatus | { in: PrismaOutboxStatus[] } };
+      where: OutboxWhere;
       orderBy: { createdAt: "asc" };
       take: number;
     }) =>
       [...this.events.values()]
-        .filter((event) => matchesOutboxStatus(event.outboxStatus, where.outboxStatus))
+        .filter((event) => matchesOutboxWhere(event, where))
         .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime())
         .slice(0, take),
     updateMany: async ({
       where,
       data
     }: {
-      where: { id: string; outboxStatus: PrismaOutboxStatus | { in: PrismaOutboxStatus[] } };
-      data: { outboxStatus: PrismaOutboxStatus; publishedAt?: Date };
+      where: OutboxWhere;
+      data: AuctionEventUpdateData;
     }) => {
+      if (!where.id) {
+        return { count: 0 };
+      }
+
       const event = this.events.get(where.id);
 
-      if (!event || !matchesOutboxStatus(event.outboxStatus, where.outboxStatus)) {
+      if (!event || !matchesOutboxWhere(event, where)) {
         return { count: 0 };
       }
 
       this.events.set(where.id, {
         ...event,
-        outboxStatus: data.outboxStatus,
+        outboxStatus: data.outboxStatus ?? event.outboxStatus,
+        publishAttemptCount:
+          event.publishAttemptCount + (data.publishAttemptCount?.increment ?? 0),
+        publishClaimedBy:
+          data.publishClaimedBy === undefined
+            ? event.publishClaimedBy
+            : data.publishClaimedBy,
+        publishClaimedUntil:
+          data.publishClaimedUntil === undefined
+            ? event.publishClaimedUntil
+            : data.publishClaimedUntil,
+        lastPublishError:
+          data.lastPublishError === undefined
+            ? event.lastPublishError
+            : data.lastPublishError,
         publishedAt: data.publishedAt ?? event.publishedAt
       });
 
@@ -219,8 +255,38 @@ describe("AuctionEventPublisherService", () => {
 
     assert.deepEqual(result, { published: 0, failed: 1 });
     assert.equal(prisma.events.get(event.id)?.outboxStatus, PrismaOutboxStatus.FAILED);
+    assert.equal(prisma.events.get(event.id)?.publishAttemptCount, 1);
     assert.equal(prisma.auditLogs.length, 1);
     assert.equal(prisma.auditLogs[0]?.action, "AUCTION_EVENT_PUBLISH_FAILED");
+  });
+
+  it("moves an event to dead letter after the maximum publish attempts", async () => {
+    const prisma = new FakePrisma();
+    const gateway = new FakeGateway();
+    const event = makeEvent(PrismaAuctionEventType.ORDER_CREATED, {
+      orderId: "order_1",
+      amountFen: 10000
+    });
+    prisma.events.set(event.id, {
+      ...event,
+      outboxStatus: PrismaOutboxStatus.FAILED,
+      publishAttemptCount: 4
+    });
+    const publisher = new AuctionEventPublisherService(
+      prisma as unknown as PrismaService,
+      gateway as unknown as AuctionRealtimeGateway
+    );
+
+    const result = await publisher.publishPendingOnce();
+
+    assert.deepEqual(result, { published: 0, failed: 1 });
+    assert.equal(prisma.events.get(event.id)?.outboxStatus, PrismaOutboxStatus.DEAD_LETTER);
+    assert.equal(prisma.events.get(event.id)?.publishAttemptCount, 5);
+    assert.equal(
+      (prisma.auditLogs[0]?.metadata as { nextOutboxStatus?: PrismaOutboxStatus })
+        .nextOutboxStatus,
+      PrismaOutboxStatus.DEAD_LETTER
+    );
   });
 
   it("retries failed outbox events and marks them published after a later successful broadcast", async () => {
@@ -249,7 +315,72 @@ describe("AuctionEventPublisherService", () => {
       [[userRoomName("user_new"), AuctionWebSocketEvent.OrderCreated]]
     );
   });
+
+  it("reclaims expired processing events by lease", async () => {
+    const prisma = new FakePrisma();
+    const gateway = new FakeGateway();
+    const event = makeEvent(PrismaAuctionEventType.AUCTION_CANCELLED, {
+      reason: "lease expired"
+    });
+    prisma.events.set(event.id, {
+      ...event,
+      outboxStatus: PrismaOutboxStatus.PROCESSING,
+      publishAttemptCount: 1,
+      publishClaimedBy: "stale-worker",
+      publishClaimedUntil: new Date("2026-06-01T09:59:00.000Z")
+    });
+    const publisher = new AuctionEventPublisherService(
+      prisma as unknown as PrismaService,
+      gateway as unknown as AuctionRealtimeGateway
+    );
+
+    const result = await publisher.publishPendingOnce();
+
+    assert.deepEqual(result, { published: 1, failed: 0 });
+    assert.equal(prisma.events.get(event.id)?.outboxStatus, PrismaOutboxStatus.PUBLISHED);
+    assert.equal(prisma.events.get(event.id)?.publishAttemptCount, 2);
+  });
 });
+
+function matchesOutboxWhere(event: AuctionEvent, where: OutboxWhere): boolean {
+  if (where.id && event.id !== where.id) {
+    return false;
+  }
+
+  if (where.outboxStatus && !matchesOutboxStatus(event.outboxStatus, where.outboxStatus)) {
+    return false;
+  }
+
+  if (
+    where.publishAttemptCount &&
+    !(event.publishAttemptCount < where.publishAttemptCount.lt)
+  ) {
+    return false;
+  }
+
+  if (
+    where.publishClaimedBy !== undefined &&
+    event.publishClaimedBy !== where.publishClaimedBy
+  ) {
+    return false;
+  }
+
+  if (
+    where.publishClaimedUntil &&
+    !(
+      event.publishClaimedUntil !== null &&
+      event.publishClaimedUntil.getTime() < where.publishClaimedUntil.lt.getTime()
+    )
+  ) {
+    return false;
+  }
+
+  if (where.OR && !where.OR.some((item) => matchesOutboxWhere(event, item))) {
+    return false;
+  }
+
+  return true;
+}
 
 function matchesOutboxStatus(
   actual: PrismaOutboxStatus,
@@ -276,6 +407,10 @@ function makeEvent(
       ...payload
     } as never,
     outboxStatus: PrismaOutboxStatus.PENDING,
+    publishAttemptCount: 0,
+    publishClaimedBy: null,
+    publishClaimedUntil: null,
+    lastPublishError: null,
     publishedAt: null,
     createdAt: new Date("2026-06-01T09:59:50.000Z")
   };

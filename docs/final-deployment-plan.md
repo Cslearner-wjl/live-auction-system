@@ -16,6 +16,19 @@
 
 按本地演示闭环衡量，当前完成度约为 **80%-85%**；剩余工作主要是真实双窗口联调、断线重连手测记录、最新代码下重跑 30/100 HTTP 压测、补齐 Docker Compose 一键演示流程说明。
 
+### 2026-06-01 执行更新
+
+本轮已按该计划补齐一批“最后项目任务”：
+
+- 出价链路：新增 Redis 分布式锁 `auction:{auctionId}:bid_lock`，保留本进程队列，锁等待超时返回 `BID_CONCURRENCY_BUSY`。
+- outbox：新增 `PROCESSING`、`DEAD_LETTER` 状态和 claim/lease 字段，发布器支持 claim、失败重试、lease 过期重领和死信。
+- 对账：新增 `AuctionConsistencyService`，周期比较 Redis 热状态和 DB `AuctionSession`，差异写审计。
+- 管理端：新增 `POST /admin/auctions/with-item`，商品、规则和竞拍在同一事务内创建，前端创建页已改用该接口。
+- 压测：新增 `pnpm perf:socket` Socket.IO 连接压测脚本；真实 100/1000 连接结果待补。
+- 部署：新增 server/admin/mobile Dockerfile、`docker-compose.prod.yml` 和 GitHub Actions CI。
+
+因此，生产化可部署完成度可上调到约 **72%-78%**。仍未完成的阻断项主要是：真实认证 / 权限 / 限流、Playwright 浏览器全链路、100/1000 Socket.IO 真实压测结果、生产 compose 在新机器上的实跑记录，以及自动修复型对账或人工 repair SOP。
+
 ## 2. Diff 审视摘要
 
 本轮审视到的主要改动方向：
@@ -47,12 +60,12 @@
 
 这些事项完成前，不应宣称“生产化可部署”：
 
-1. 跨进程出价顺序机制：使用 Redis Stream、BullMQ、DB claim 或分布式锁替换本地内存队列。
-2. Redis/DB 自动对账 worker：定期校验 `AuctionSession`、`Bid`、`Order`、Redis 热 key 和 outbox 事件。
-3. outbox 多实例安全发布：增加 claim/lease、重试退避、最大重试次数和死信队列。
+1. 跨进程出价顺序机制：已用 Redis 分布式锁覆盖同一竞拍关键段；后续仍需在更高吞吐场景评估 Redis Stream、BullMQ 或 DB claim。
+2. Redis/DB 自动对账 worker：已实现检测和审计；后续仍需人工 repair SOP 或安全自动修复策略。
+3. outbox 多实例安全发布：已增加 claim/lease、最大重试次数和死信；后续可补指数退避和死信处理后台。
 4. 真实端到端验证：Playwright 覆盖后台创建、移动端双用户出价、封顶成交、订单和模拟支付。
-5. Socket.IO 压测：至少覆盖 100 连接基线，进阶覆盖 1000 连接和房间隔离。
-6. 生产部署包：服务端、管理端、移动端 Docker 镜像和 `docker compose` 生产模式启动说明。
+5. Socket.IO 压测：脚本已新增；至少覆盖 100 连接基线，进阶覆盖 1000 连接和房间隔离的真实结果仍待记录。
+6. 生产部署包：已新增服务端、管理端、移动端 Dockerfile 和 `docker-compose.prod.yml`；仍需新机器实跑和部署 SOP 验证。
 7. 安全基线：替换 demo header 身份，增加基础认证、角色校验、请求限流和敏感日志过滤。
 
 ## 5. 最终实施计划

@@ -9,6 +9,7 @@
     "test": "tsx --test \"src/**/*.test.ts\"",
     "test:e2e": "tsx --test \"src/**/*.e2e.test.ts\"",
     "perf:day12": "tsx src/performance/day12-http-load.ts",
+    "perf:socket": "tsx src/performance/day12-socket-load.ts",
     "perf:day12:k6": "k6 run src/performance/day12-bid-load.k6.js",
     "prisma:generate": "prisma generate --schema prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema prisma/schema.prisma",
@@ -33,6 +34,7 @@
   },
   "devDependencies": {
     "prisma": "^7.8.0",
+    "socket.io-client": "^4.8.3",
     "tsx": "^4.20.3"
   },
   "prisma": {

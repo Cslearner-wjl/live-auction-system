@@ -140,7 +140,11 @@
 | `type` | String | 是 | 无 | idx `type` | 事件类型 |
 | `serverSeq` | Int | 是 | 无 | unique with `auctionId` | 单场单调递增序列 |
 | `payload` | Json | 是 | 无 |  | 事件 payload |
-| `outboxStatus` | String | 是 | `PENDING` | idx `outboxStatus` | `PENDING`、`PUBLISHED`、`FAILED` |
+| `outboxStatus` | String | 是 | `PENDING` | idx `outboxStatus` | `PENDING`、`PROCESSING`、`PUBLISHED`、`FAILED`、`DEAD_LETTER` |
+| `publishAttemptCount` | Int | 是 | `0` |  | outbox 发布尝试次数 |
+| `publishClaimedBy` | String? | 否 | null |  | claim 当前事件的发布器实例 |
+| `publishClaimedUntil` | DateTime? | 否 | null | idx with `outboxStatus` | claim lease 过期时间 |
+| `lastPublishError` | String? | 否 | null |  | 最近一次发布失败原因，最多 500 字符 |
 | `publishedAt` | DateTime? | 否 | null |  | 广播成功时间 |
 | `createdAt` | DateTime | 是 | now | idx `createdAt` | 创建时间 |
 
@@ -148,6 +152,7 @@
 
 - `@@unique([auctionId, serverSeq])`
 - `@@index([outboxStatus, createdAt])`
+- `@@index([outboxStatus, publishClaimedUntil])`
 
 ## 10. AuditLog
 
