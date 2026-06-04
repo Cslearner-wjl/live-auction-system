@@ -1,23 +1,22 @@
 # 直播竞拍全栈系统
 
-面向抖音直播电商场景的全栈竞拍系统，目标是完成：
+面向抖音直播电商场景的全栈竞拍系统，覆盖：
 
 ```txt
-商品上架 -> 规则配置 -> 直播间展示 -> 实时出价 -> 动态排名 -> 竞拍结束 -> 成交订单
+商品上架 -> 规则配置 -> 直播间展示 -> 实时出价 -> 动态排名 -> 竞拍结束 -> 成交订单 -> 模拟支付
 ```
 
-当前已完成最终部署前补强：服务端出价 API、Redis Lua 原子出价、幂等、封顶成交、防狙击延时、WebSocket 房间隔离、断线重连 snapshot、outbox claim/lease 发布、Redis/DB 对账审计、移动端真实 REST / Socket.IO 竞拍联动、主播端事务式创建商品和竞拍、启动 / 取消 / 查看订单闭环已落地。Day 12 已补真实 HTTP 30/100 并发基线数据；2026-06-01 新增 Socket.IO 连接压测脚本、生产 Docker Compose 和 CI 配置。
+当前基线已实现本地演示闭环：管理后台、移动端 H5、NestJS API、Socket.IO 实时事件、Redis Lua 原子出价、Redis 分布式锁、outbox claim/lease/死信、Redis/DB 对账审计、真实 HTTP 30/100 并发压测、生产 Docker Compose 和 CI。
 
 ## 技术栈
 
 - Monorepo：pnpm workspace
-- 移动端 H5：React + TypeScript + Vite
-- PC 管理后台：React + TypeScript + Vite
+- 前端：React + TypeScript + Vite
 - 后端：Node.js + TypeScript + NestJS
-- 共享契约：`packages/shared`
 - 数据库：MySQL + Prisma
-- 缓存与并发：Redis
-- 实时通信：Socket.IO / WebSocket
+- 缓存 / 并发：Redis
+- 实时通道：Socket.IO
+- 测试：Node test runner、服务级 e2e、压测脚本
 - 部署：Docker Compose
 
 ## 项目结构
@@ -31,107 +30,67 @@ packages/
   shared/         # 共享状态、事件名、错误码、DTO 类型
 docs/
   README.md
-  progress.md
+  final-acceptance.md
+  demo-script.md
   architecture.md
+  consistency.md
   api.md
   websocket-events.md
+  database-schema.md
+  error-codes.md
   manual-test.md
   performance-report.md
-  demo-script.md
-  requirements-analysis.md
-  tech-stack-constraints.md
-  development-process.md
+  final-deployment-plan.md
   ai-codex-log.md
-  database-schema.md
-  consistency.md
-  error-codes.md
 ```
 
 ## 本地启动
 
 安装依赖：
 
-```bash
+```powershell
 pnpm install
 ```
 
 启动 MySQL 和 Redis：
 
-```bash
+```powershell
 docker compose up -d mysql redis
 ```
 
-本地 MySQL 使用 8.0 系列并启用 `mysql_native_password`，用于规避 MySQL 8.4 默认认证插件与当前 Prisma schema engine 的兼容问题。
-如果本机已经安装 MySQL，项目 Docker MySQL 暴露在 `127.0.0.1:3307`，容器内仍使用默认 `3306`。
-
 生成 Prisma Client：
 
-```bash
+```powershell
 pnpm --filter @live-auction/server prisma:generate
 ```
 
-执行数据库迁移和 seed：
+执行迁移和 seed：
 
-```bash
-pnpm --filter @live-auction/server prisma:migrate -- --name init
+```powershell
+pnpm --filter @live-auction/server prisma:migrate
 pnpm --filter @live-auction/server prisma:seed
 ```
 
-启动服务端：
+分别启动三端：
 
-```bash
+```powershell
 pnpm dev:server
-```
-
-启动后台：
-
-```bash
 pnpm dev:admin
-```
-
-启动移动端：
-
-```bash
 pnpm dev:mobile
 ```
 
-运行基础校验：
+常用地址：
 
-```bash
-pnpm typecheck
-pnpm build
-pnpm test
-pnpm test:e2e
-```
-
-服务端健康检查：
-
-```bash
-curl http://localhost:3000/health
-```
-
-运行 Day 12 HTTP 并发压测：
-
-```bash
-pnpm perf:day12
-```
-
-默认会创建并启动一场短期压测竞拍，发起 30 次并发出价，并校验 Redis 热状态、数据库快照、snapshot 和订单唯一性。可用 `DAY12_BID_ATTEMPTS=100 pnpm perf:day12` 跑 100 次并发出价。k6 模板入口为 `pnpm perf:day12:k6`，需要本机已安装 k6 并提供 `DAY12_AUCTION_ID`。
-
-运行 Socket.IO 连接压测：
-
-```bash
-pnpm perf:socket
-$env:SOCKET_CONNECTIONS='1000'; pnpm perf:socket; Remove-Item Env:SOCKET_CONNECTIONS
-```
-
-默认会连接 `room_1`，自动从 `GET /rooms/room_1/auctions` 选择一个竞拍，完成 `joinRoom`、`joinAuction`、`requestSnapshot` 和 `PING/PONG`。也可以设置 `SOCKET_AUCTION_ID` 固定竞拍。
+| 入口 | 地址 |
+| --- | --- |
+| 后端健康检查 | `http://localhost:3000/health` |
+| 管理后台 | `http://localhost:5173/admin/items/new` |
+| 移动端用户 A | `http://localhost:5174/?roomId=room_1&userId=user_1&auctionId=<auctionId>` |
+| 移动端用户 B | `http://localhost:5174/?roomId=room_1&userId=user_2&auctionId=<auctionId>` |
 
 ## 生产 Compose 演示
 
-构建并启动 MySQL、Redis、server、admin 静态站点和 mobile 静态站点：
-
-```bash
+```powershell
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
@@ -141,149 +100,73 @@ docker compose -f docker-compose.prod.yml up -d --build
 - admin: `http://localhost:8080`
 - mobile: `http://localhost:8081`
 
-`docker-compose.prod.yml` 会在 server 启动前执行 Prisma migrate deploy 和 seed，适合本地一键演示。真实生产环境应改为独立迁移步骤，并替换 demo header 身份、默认数据库密码和公网 CORS 配置。
+`docker-compose.prod.yml` 会在 server 启动前执行 Prisma migrate deploy 和 seed，适合本地一键演示。真实生产环境应拆分迁移步骤，替换 demo 身份、默认数据库密码和公网 CORS 配置。
+
+## 验证命令
+
+```powershell
+pnpm typecheck
+pnpm test
+pnpm test:e2e
+pnpm lint
+pnpm build
+```
+
+真实 HTTP 并发压测：
+
+```powershell
+pnpm perf:day12
+$env:DAY12_BID_ATTEMPTS='100'; pnpm perf:day12; Remove-Item Env:DAY12_BID_ATTEMPTS
+```
+
+Socket.IO 连接压测入口：
+
+```powershell
+pnpm perf:socket
+$env:SOCKET_CONNECTIONS='1000'; pnpm perf:socket; Remove-Item Env:SOCKET_CONNECTIONS
+```
+
+当前已记录 HTTP 30/100 并发出价结果，以及 Socket.IO 100/1000 连接压测结果。
 
 ## 环境变量
 
 复制 `.env.example` 到 `.env` 后填写本地配置。真实密钥只允许放在 `.env`，不得提交。
 
-## Day 1 完成内容
+主要变量：
 
-- 创建 pnpm monorepo。
-- 创建 `apps/server` NestJS 骨架和 `/health` 健康检查。
-- 创建 `apps/admin` 和 `apps/mobile` Vite React 骨架。
-- 创建 `packages/shared`，沉淀竞拍状态、WebSocket 事件和错误码。
-- 补齐架构、API、WebSocket 事件和进度追踪文档。
+| 变量 | 用途 |
+| --- | --- |
+| `DATABASE_URL` | Prisma MySQL 连接 |
+| `REDIS_URL` | Redis 连接 |
+| `ADMIN_WEB_URL` / `MOBILE_WEB_URL` | 本地 CORS 来源 |
+| `BID_LOCK_*` | Redis 出价锁配置 |
+| `OUTBOX_*` | outbox claim / retry 配置 |
+| `AUCTION_CONSISTENCY_*` | Redis/DB 对账审计配置 |
 
-## Day 2 完成内容
+## 本地图片上传
 
-- 新增 `docker-compose.yml`，提供本地 MySQL 和 Redis。
-- 新增 Prisma schema，覆盖用户、直播间、商品、规则、竞拍、出价、订单、事件和审计日志。
-- 新增 Prisma seed，创建 `admin_1`、`user_1`、`user_2`、`room_1`、`item_1`、`auction_1` 演示数据。
-- 后端接入 Prisma 和 Redis 服务边界。
-- `/health` 返回服务、数据库和 Redis 状态。
+管理后台“商品上架”支持选择本地 `jpg/png/webp/gif` 图片。图片会上传到服务端静态目录，并自动填入类似下面的 URL：
 
-## Day 3 完成内容
+```txt
+http://localhost:3000/uploads/items/<file>.jpg
+```
 
-- 新增后台 demo 鉴权，`/admin/*` 需要 `X-Demo-User-Id` 和 `X-Demo-Role: admin`。
-- 新增商品 API：创建、分页列表、详情、修改。
-- 新增竞拍 API：创建竞拍和规则、分页列表、详情、修改未开始规则、启动、取消。
-- 新增规则校验：`0` 元起拍、固定加价大于 `0`、封顶价大于起拍价、开拍后禁止修改规则。
-- 新增最小 `AuctionStateMachineService`，集中处理 Day 3 的启动和取消状态流转。
-- 新增服务端单元测试，覆盖 Day 3 核心规则和状态流转。
+单张图片解码后最大 3MB；该能力用于本地演示，真实生产应接入对象存储或 CDN。
 
-## Day 4 完成内容
+## 核心文档
 
-- 扩展 `AuctionStateMachineService.finishAuction`，支持到期成交和流拍结算。
-- 有最高出价人时创建 `PENDING_PAYMENT` 订单；无人出价时流拍且不生成订单。
-- 订单创建在状态机事务内完成，并由 `Order(auctionId)` 唯一约束防止重复订单。
-- 新增 `AuctionSchedulerService`，启动竞拍后注册单机结束 timer，服务启动时恢复 `RUNNING` 竞拍的 timer。
-- 取消竞拍时清理本进程结束 timer。
-- 新增管理端订单查询 API：`GET /admin/orders`、`GET /admin/orders/:orderId`。
-- 新增状态机单元测试，覆盖成交、流拍、未到结束时间拒绝、重复结束不重复建单。
-
-## Day 5 完成内容
-
-- 新增用户端出价 API：`POST /auctions/:auctionId/bids`，使用 `X-Demo-Role: bidder` demo 身份。
-- 新增 Redis Lua 原子出价路径，维护当前价、最高出价人、结束时间、出价次数、排行榜和 `clientBidId` 热幂等键。
-- 出价服务落库 `Bid`，更新 `AuctionSession` 快照字段，并写入 `AuctionEvent(BID_ACCEPTED, outboxStatus=PENDING)`。
-- 支持固定加价校验、最高出价人不可重复出价、封顶价校验、重复 `clientBidId` 幂等兜底。
-- 达到 `capPriceFen` 后调用状态机立即成交，并继续依赖 `Order(auctionId)` 唯一约束防重复订单。
-- 结束前防狙击窗口内有效出价会延长 `endTime` 并重排本进程结束 timer。
-- 新增服务端单元测试，覆盖 30 和 100 并发出价、重复 `clientBidId`、并发封顶、延时和核心拒绝规则。
-
-## Day 6 完成内容
-
-- 新增 `RealtimeModule`，提供 Socket.IO gateway、实时 REST 查询和 outbox 发布器。
-- WebSocket 连接使用 demo 身份加入 `user:{userId}`，支持 `joinRoom`、`joinAuction`、`leaveAuction`、`requestSnapshot`、`placeBid` 和 `PING`。
-- 新增 `GET /rooms/:roomId/auctions`、`GET /auctions/:auctionId`、`GET /auctions/:auctionId/snapshot`，snapshot 包含 `roomId`、`serverTime`、`serverSeq`、排行榜和当前用户排名。
-- 状态机在启动、取消、成交/流拍和订单创建时写入 `AuctionEvent` outbox。
-- `AuctionEventPublisherService` 轮询 `PENDING` / `FAILED` 事件，按 `room:{roomId}`、`auction:{auctionId}`、`user:{userId}` 定向广播或重试，并在成功后标记 `PUBLISHED`，失败时标记 `FAILED` 并写审计日志。
-- `BID_ACCEPTED` outbox 会拆分广播 `BID_ACCEPTED`、`LEADING`、`OUTBID`，触发延时时同时广播 `AUCTION_EXTENDED`。
-- 新增服务端单元测试，覆盖房间加入、重连 snapshot、outbox 房间隔离、私有提醒和发布失败留痕。
-
-## Day 7 完成内容
-
-- 管理端从 Day 1 骨架升级为可用后台工作台。
-- 竞拍列表接入 `GET /admin/auctions`，支持状态筛选、刷新、启动竞拍和取消异常竞拍。
-- 竞拍列表展示商品图、商品名、卖点标签、起拍价、固定加价、封顶价、当前价 / 成交金额、出价次数、竞拍状态和剩余时间。
-- 订单列表接入 `GET /admin/orders`，展示订单 ID、竞拍 ID、商品、买家、成交金额、订单状态和创建时间。
-- 管理端订单 API 追加商品名、商品图、买家脱敏名和竞拍状态字段，便于后台列表展示。
-- 补充取消竞拍写入 `AUCTION_CANCELLED` outbox 的单元测试，延续 Day 6 发布器房间隔离覆盖。
-- 文档、AI 协作日志和本地学习文档同步到 Day 7。
-
-## Day 8 完成内容
-
-- 移动端从占位页升级为直播间主体验，包含主播信息、在线人数、直播画面、评论流、底部互动区和竞拍商品小卡片。
-- 竞拍小卡片展示商品图、当前价 / 起拍价、倒计时和出价次数，点击后打开底部半屏竞拍面板。
-- 半屏面板展示商品详情、卖点、起拍价、加价幅度、封顶价、防狙击延时摘要、我的出价状态和实时排名。
-- 新增本地 mock 出价交互：`+` / `-` 步进、立即出价、领先提示、一次模拟被超越提醒、倒计时最后 10 秒视觉增强和封顶成交本地反馈。
-- 新增 `mobile-auction-service.ts`，用 `AuctionSnapshot` 形状承接 mock 数据和本地出价计算，为 Day 9 接真实 REST / Socket.IO 预留边界。
-- 文档、AI 协作日志和本地学习文档同步到 Day 8。
-
-## Day 9 完成内容
-
-- `apps/mobile` 首次进入直播间会读取 `GET /rooms/:roomId/auctions`、`GET /auctions/:auctionId` 和 `GET /auctions/:auctionId/snapshot`。
-- 移动端通过服务端 `serverTime` 校准倒计时，通过 `serverSeq` 丢弃旧事件，发现跳号时重新拉取 snapshot。
-- `mobile-auction-service.ts` 已替换为真实 REST service，并新增 Socket.IO client 封装。
-- Socket.IO 连接后加入 `room:{roomId}` 和 `auction:{auctionId}`，并通过 `requestSnapshot` 做重连恢复。
-- 出价按钮提交真实 `POST /auctions/:auctionId/bids`，生成稳定 `clientBidId`，并展示服务端错误消息。
-- 移动端处理 `BID_ACCEPTED`、`LEADING`、`OUTBID`、`AUCTION_EXTENDED`、`AUCTION_ENDED`、`ORDER_CREATED` 和 `AUCTION_CANCELLED`。
-- 保留 `?roomId=room_1&userId=user_2&auctionId=...` 这类查询参数，便于多窗口模拟不同用户并固定到同一竞拍联调。
-- 移动端成交后可展示结果弹窗，中拍用户收到订单事件后可调用模拟支付。
-- 修复 demo seed 和 Redis 出价序列初始化问题，`auction_1` 可以重复 seed、启动并完成真实出价联调。
-
-## Day 10 完成内容
-
-- 管理端新增“商品上架”视图，支持直接访问 `/admin/items` 和 `/admin/items/new`。
-- 商品表单支持商品名称、图片 URL、介绍和卖点标签。
-- 竞拍规则表单支持直播间 ID、0 元起拍、固定加价、竞拍时长、封顶价、防狙击窗口、延时时长和最大延时次数。
-- 管理端提交时调用 `POST /admin/auctions/with-item`，后端在同一事务内创建商品、规则和 `SCHEDULED` 竞拍，成功后回到竞拍列表。
-- 前端金额按元输入，提交前转换为整数分；规则合法性继续由后端校验和状态机兜底。
-- 管理端提供轻量 SPA path 映射：`/admin/auctions`、`/admin/items/new`、`/admin/orders`。
-- 出价落库失败时会尝试 Redis 热状态安全回滚，并记录补偿审计。
-- outbox `FAILED` 事件后续会被发布器重试，临时广播失败可恢复。
-- 新增 `pnpm test:e2e`，服务级覆盖 Day10 核心闭环：创建商品、创建竞拍、启动、用户端可见、封顶成交、后台订单可见。
-- 新增 `docs/day10-result.md` 记录 Day10 成果、问题和后续建议。
-
-## Day 11 完成内容
-
-- 新增 `apps/server/src/day11-auction-scenarios.e2e.test.ts`，服务级覆盖 Day 11 异常场景。
-- 覆盖无人出价到期流拍且不生成订单。
-- 覆盖一人出价到期成交、生成订单，并通过 snapshot 恢复最新状态。
-- 覆盖多人连续出价、当前价单调、最高价唯一、领先用户再次出价被拒绝和重连 snapshot 排名恢复。
-- 覆盖结束前出价触发防狙击延时并重排结束 timer。
-- 覆盖达到封顶价立即成交、只生成一个订单、后续出价返回竞拍已结束。
-- 覆盖主播取消运行中竞拍、写入 `AUCTION_CANCELLED` outbox、后续出价返回竞拍已取消。
-- 覆盖重复点击同一 `clientBidId` 返回幂等结果，不重复写入 Bid 或成功事件。
-
-## Day 12 完成内容
-
-- 新增 `apps/server/src/performance/day12-http-load.ts`，可对真实 server + MySQL + Redis 发起 HTTP 并发出价压测。
-- 新增 `apps/server/src/performance/day12-bid-load.k6.js`，作为 k6 外部压测模板。
-- 新增脚本入口：`pnpm perf:day12`、`pnpm perf:day12:k6`。
-- 真实 HTTP 压测覆盖 30 和 100 并发出价，并自动校验 Redis 当前价、最高出价人、`bidCount`、排行榜、数据库快照、snapshot 和重复订单。
-- 压测发现并修复真实 Redis Lua payload 中 `previousUserLeaderboardAmountFen` 解析问题。
-- 压测发现并修复 Redis accepted 后 DB 并发持久化乱序问题；Day13 审查后进一步把同一竞拍的幂等检查、Redis Lua 和 DB 持久化整体放入当前单进程 `auctionId` 级队列，避免失败 accepted bid 后续无法安全回滚。
-- `docs/performance-report.md` 已记录真实 30/100 HTTP 并发基线数据。
-
-## Day 13 审查补强
-
-- 暂缓 AI 卖点 / 直播话术功能，优先补完整演示主链路。
-- 同一竞拍的幂等检查、Redis Lua 和 DB 持久化整体进入当前单进程 `auctionId` 级队列，避免失败 accepted bid 后续无法安全回滚。
-- outbox 定时发布增加单进程防重入。
-- 新增用户端订单和模拟支付接口：`GET /users/me/auction-history`、`GET /orders/:orderId`、`POST /orders/:orderId/mock-pay`。
-- 移动端新增竞拍结果弹窗和模拟支付入口；刷新到已中拍场次时可通过竞拍历史恢复订单号。
-- 新增 `docs/day14-demo-checklist.md`，记录 Day14 演示前检查项和剩余风险。
+- `docs/final-acceptance.md`：最终演示验收材料。
+- `docs/demo-script.md`：5 分钟演示脚本。
+- `docs/architecture.md`：系统架构和模块边界。
+- `docs/api.md`：REST API 契约。
+- `docs/websocket-events.md`：WebSocket / Socket.IO 事件契约。
+- `docs/performance-report.md`：真实压测数据和待补指标。
+- `docs/manual-test.md`：最终手工测试清单。
 
 ## 当前限制
 
-- 移动端真实出价依赖服务端、MySQL、Redis 已启动，且目标竞拍已经由后台启动为 `RUNNING`。
-- 移动端当前以 HTTP `POST /auctions/:auctionId/bids` 作为主出价路径，Socket.IO `placeBid` 仍作为服务端能力保留。
-- 管理端创建商品和竞拍复用两个既有接口串行调用；如果商品创建成功但竞拍创建失败，可能留下未绑定商品，后续可补一个后端组合事务接口。
-- Day10/Day11 e2e 是服务级 fake 环境测试；Day12 已补真实 HTTP + Redis + MySQL 压测，但真实浏览器多窗口和 1000 Socket.IO 连接压测仍需后续记录。
-- 当前结束调度是 MVP 单机 timer，多实例部署需要切换到 Redis delayed queue 或 BullMQ。
-- 同一竞拍的出价处理在当前单进程内按竞拍串行排队；多实例部署仍需要 Redis Stream、消息队列或 DB claim 机制保证跨进程顺序。
-- 封顶成交会让数据库 `serverSeq` 继续推进到结束和订单事件；Redis 热状态中的 seq/status 暂不反向同步，后续对账任务需要覆盖。
-- outbox retry 目前没有 retry 次数、退避和死信队列，坏 payload 会重复失败并写审计。
-- 1000 Socket.IO 连接压测、Redis/DB 周期自动对账和 outbox 退避/死信队列仍需补充。
+- 当前身份是 demo header / query 参数模拟，不适合公网生产。
+- 结束调度仍是单机 timer，多实例部署应切换到 Redis delayed queue、BullMQ 或等价方案。
+- 对账 worker 只检测并写审计，不自动修复价格、赢家、订单或状态。
+- Playwright 浏览器全链路和生产 compose 新环境实跑仍待补。
+- 真实支付、真实直播推流和 AI 卖点生成不在当前主流程完成范围内。

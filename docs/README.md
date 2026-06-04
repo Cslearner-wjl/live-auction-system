@@ -1,40 +1,61 @@
 # 文档索引
 
-当前基线：2026-06-01 最终补强后。服务端用户出价 API、Redis Lua 原子出价、幂等、封顶成交、防狙击延时、Socket.IO 房间隔离、断线重连 snapshot、outbox claim/lease/死信、Redis/DB 对账审计、移动端真实 REST / Socket.IO 联动、主播端事务式创建商品 / 配置竞拍 / 启动 / 取消 / 查看订单闭环已落地；Day 12 已补真实 HTTP + MySQL + Redis 30/100 并发基线数据，本轮新增 Socket.IO 压测脚本、生产 Docker Compose 和 CI 配置。
+当前基线：2026-06-03 文档整理后。本文档只保留评审和后续维护需要的入口，阶段性 Day 过程记录已合并到最终验收、手测、性能报告和 AI 协作日志中。
 
-## 必读文档
+## 验收入口
 
-| 文档 | 用途 | 当前状态 |
+| 文档 | 用途 | 维护口径 |
 | --- | --- | --- |
-| `progress.md` | Day 1-Day 13 进度、Day 14 下一步 | 持续维护 |
-| `final-deployment-plan.md` | 最终可部署差距评估、阻断项、已执行补强和剩余计划 | 2026-06-01 已更新 |
-| `day14-demo-checklist.md` | Day 14 完整演示前检查清单、已修复问题和剩余风险 | Day 13 审查新增 |
-| `day10-result.md` | Day 10 竞拍核心闭环成果、问题和补强记录 | Day 10 已新增 |
-| `architecture.md` | 模块边界、状态机、调度、一致性总体设计 | 已对齐最终补强 |
-| `api.md` | REST API 契约和已实现范围 | 已补事务式创建接口 |
-| `websocket-events.md` | WebSocket 房间、事件和快照契约 | Day 9 移动端已接入真实事件 |
-| `database-schema.md` | Prisma 数据模型、索引和唯一约束 | Day 2 后持续对齐 |
-| `error-codes.md` | 稳定错误码全集 | 随 shared 包更新 |
-| `consistency.md` | Redis 与数据库一致性方案 | 已补 Redis 分布式锁、outbox claim/lease 和对账 worker |
+| `final-acceptance.md` | 对齐 `demo-script.md` 第五项的最终提交材料清单 | 最终提交前优先更新 |
+| `demo-script.md` | 5 分钟录屏和答辩讲解脚本 | 只讲已实现或已验证能力 |
+| `manual-test.md` | 浏览器和本地演示手工验收清单 | 未实测项明确标注待测 |
+| `performance-report.md` | 真实压测数据、脚本入口和未完成指标 | 禁止把未执行脚本写成结果 |
+| `ai-codex-log.md` | AI 辅助开发和文档整理记录 | 每次实质变更追加记录 |
 
-## 验收材料
-
-| 文档 | 用途 | 当前状态 |
-| --- | --- | --- |
-| `manual-test.md` | 手工测试清单和执行记录 | 已补最终补强清单；真实浏览器多窗口和 1000 Socket.IO 仍待补测 |
-| `performance-report.md` | 压测环境、结果和一致性校验记录 | 已记录 Day 12 HTTP 基线，已补 Socket.IO 压测入口 |
-| `demo-script.md` | 最终录屏和答辩演示脚本 | 包含 Day 12 后台创建、移动端出价、异常场景和压测数据可演示范围 |
-| `weekly-report-2026-06-01.md` | 2026-05-26 至 2026-06-01 周报 | 已新增 |
-| `ai-codex-log.md` | AI 辅助开发过程记录 | 持续维护 |
-
-## 背景材料
+## 契约文档
 
 | 文档 | 用途 |
 | --- | --- |
-| `requirements-analysis.md` | 原始需求拆解和验收口径 |
-| `tech-stack-constraints.md` | 技术栈、安全、测试和性能约束 |
-| `development-process.md` | 15 天开发节奏和每日交付目标 |
+| `architecture.md` | 系统架构、状态机、出价链路、实时事件和部署边界 |
+| `consistency.md` | Redis 热状态、数据库权威状态、outbox 和对账策略 |
+| `api.md` | REST API 契约、错误格式和 DTO 示例 |
+| `websocket-events.md` | Socket.IO 房间、客户端事件、服务端事件和 snapshot 契约 |
+| `database-schema.md` | Prisma 模型、索引、唯一约束和 outbox 字段 |
+| `error-codes.md` | 稳定错误码全集 |
 
-## 已清理内容
+## 背景材料
 
-- `day1-todo.md` 已删除。原因是其中早期待办已完成，继续保留会造成过期信息；进度追踪已迁移到 `progress.md`。
+| 文档 | 用途 | 说明 |
+| --- | --- | --- |
+| `requirements-analysis.md` | 原始需求拆解 | 作为需求基线保留，不作为当前完成度报告 |
+| `tech-stack-constraints.md` | 技术栈和工程约束 | 作为约束基线保留，当前实现以契约文档为准 |
+
+## 本地学习材料
+
+`docs/learning/` 是本地学习沉淀目录，不进入 Git 提交范围。每日收尾仍需要更新 `docs/learning/engineering-experience.md`，但最终验收材料不依赖该目录。
+
+## 本轮删减
+
+以下过程性或重复文档已删除，相关事实已迁移到上方入口：
+
+| 已删除文档 | 删减原因 | 替代入口 |
+| --- | --- | --- |
+| `progress.md` | Day 进度与 README、AI 日志、最终验收重复，且顶部状态已过时 | `final-acceptance.md`、`ai-codex-log.md` |
+| `development-process.md` | 15 天计划属于早期规划，已不适合做当前状态入口 | `final-acceptance.md` |
+| `day10-result.md` | 阶段成果已被后续最终补强覆盖 | `manual-test.md`、`performance-report.md` |
+| `day14-demo-checklist.md` | 演示清单与最终验收、手测清单重复 | `final-acceptance.md`、`manual-test.md` |
+| `weekly-report-2026-06-01.md` | 周报与 AI 日志、性能报告重复，且不是最终提交必需材料 | `ai-codex-log.md` |
+
+## 代码审视结论
+
+- 后端实际入口位于 `apps/server/src`：管理端 API、用户端出价 API、状态机、调度器、Redis 出价 store、outbox 发布器、snapshot 服务和对账 worker 已分层实现。
+- 共享状态、错误码、WebSocket 事件和 snapshot 类型来自 `packages/shared/src`。
+- 前端实际入口位于 `apps/admin/src/App.tsx` 和 `apps/mobile/src/App.tsx`，移动端通过真实 REST + Socket.IO 联动，后台通过组合事务接口创建商品和竞拍。
+- 已实现 Redis 分布式出价锁、Redis Lua 原子出价、`clientBidId` 幂等、outbox claim/lease/死信、Redis/DB 对账审计、生产 compose 和 CI。
+- 仍不能宣称已完成：真实认证、真实支付、Playwright 浏览器全链路、生产 compose 新机器实跑记录、自动修复型对账。
+
+## 维护规则
+
+- 行为或接口变化时先改契约文档，再同步演示和手测文档。
+- 压测、手测、部署只能记录真实执行结果；计划项必须标注为待测或待实现。
+- 根 `README.md` 负责快速启动；`docs/README.md` 负责文档导航；不要再新增 Day 过程文档。

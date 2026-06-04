@@ -1,193 +1,85 @@
 # 手工测试清单
 
-本文档用于记录难以完全自动化的演示级流程。每次完成相关功能后，在结果栏记录日期、环境和结论。
+本文档只记录自动化难以完全覆盖、但最终演示需要确认的真实浏览器和本地环境流程。自动化测试覆盖情况见 `package.json` 脚本和对应服务端测试文件；最终提交材料见 `docs/final-acceptance.md`。
 
-当前基线：2026-06-01 最终补强已完成。出价 API、Redis Lua、封顶成交、防狙击延时、Socket.IO 房间隔离、outbox claim/lease、重连 snapshot、Redis/DB 对账审计、管理端事务式创建商品 / 竞拍表单、管理端工作台和移动端真实 REST / Socket.IO 页面已有自动化、类型检查或构建检查；Day 12 已补真实 HTTP 30/100 并发压测和一致性校验，真实浏览器多窗口联动和 1000 Socket.IO 连接压测结果仍需后续补测。
+## 1. 当前自动化覆盖
 
-| 场景 | 前置条件 | 操作 | 预期结果 | 结果 |
+| 范围 | 证据 | 说明 |
+| --- | --- | --- |
+| 状态机合法 / 非法流转 | `apps/server/src/auction/auction-state-machine.service.test.ts` | 启动、取消、成交、流拍、重复结算和订单唯一性 |
+| 竞拍规则校验 | `apps/server/src/auction/auction-rule.validation.test.ts` | 0 元起拍、加价幅度、封顶价、开拍后禁止改规则 |
+| 出价引擎 | `apps/server/src/bid/bid.service.test.ts` | 低价、步长、最高价人重复、封顶、幂等、30/100 并发、Redis 锁、DB 失败回滚 |
+| WebSocket / outbox | `apps/server/src/realtime/*.test.ts` | 房间隔离、snapshot、发布失败、claim/lease、死信 |
+| 用户订单 | `apps/server/src/order/user-orders.service.test.ts` | 竞拍历史、订单详情、买家权限、模拟支付 |
+| 服务级闭环 | `apps/server/src/day10-core-loop.e2e.test.ts` | 创建商品、创建竞拍、启动、封顶成交、后台订单可见 |
+| 服务级异常场景 | `apps/server/src/day11-auction-scenarios.e2e.test.ts` | 流拍、一人成交、连续出价、延时、取消、幂等、snapshot 恢复 |
+| 真实 HTTP 压测 | `pnpm perf:day12` | 真实 server + MySQL + Redis，30/100 并发出价一致性通过 |
+
+## 2. 最终演示手测清单
+
+| 场景 | 前置条件 | 操作 | 预期结果 | 当前记录 |
 | --- | --- | --- | --- | --- |
-| 后台创建商品 | 已启动服务端，数据库已 seed `admin_1` | 在管理端“商品上架”表单填写商品名称、图片 URL、介绍和卖点，提交 | 调用 `POST /admin/auctions/with-item`，后端事务内创建商品、规则和竞拍 | 2026-06-01：管理端已改为组合事务接口；`pnpm --filter @live-auction/server test` 服务级闭环覆盖创建商品和竞拍；真实浏览器提交待补测 |
-| 后台创建 0 元起拍竞拍 | 已有 `room_1`，管理端表单中起拍价填 `0` | 在同一表单填写固定加价、时长、封顶价、防狙击窗口、延时时长和最大延时次数，提交 | 返回 `SCHEDULED` 竞拍，`currentPriceFen` 为 `0`，列表刷新后可启动 | 2026-06-01：页面转换整数分并调用 `POST /admin/auctions/with-item`；`pnpm --filter @live-auction/server test` 服务级闭环覆盖事务式创建、启动、用户端可见和成交订单 |
-| 后台拒绝非法规则 | 已启动服务端 | 创建竞拍时传 `incrementFen: 0` 或 `capPriceFen <= startPriceFen` | 返回 `400 VALIDATION_FAILED`，错误字段稳定 | 单元测试已覆盖核心规则，接口待测 |
-| 开拍后禁止改规则 | 已创建并启动竞拍 | 调用 `PATCH /admin/auctions/:id/rules` | 返回 `409 RULE_CANNOT_BE_CHANGED_AFTER_START` | 单元测试已覆盖核心规则，接口待测 |
-| 后台取消竞拍 | 竞拍为 `SCHEDULED` 或 `RUNNING` | 调用 `POST /admin/auctions/:id/cancel` 并填写原因 | 状态变为 `CANCELLED`，返回取消原因和时间，写入 `AUCTION_CANCELLED` outbox | 2026-05-27：状态机单元测试覆盖取消 outbox；真实接口待 Docker 环境补测 |
-| 无人出价到期流拍 | 已创建并启动竞拍，时长较短 | 不提交任何出价，等待到期 | 状态变为 `ENDED_UNSOLD`，不生成订单；outbox 产生并广播 `AUCTION_ENDED` | 2026-05-31：`day11-auction-scenarios.e2e.test.ts` 服务级 e2e 覆盖流拍和无订单；真实 timer 接口流程待测 |
-| 单人出价成交 | 竞拍运行中 | 用户 A 提交有效出价，等待到期 | 状态变为 `ENDED_SOLD`，生成一个订单，买家为用户 A | 2026-05-31：Day 11 服务级 e2e 覆盖一人出价到期成交、订单生成和 snapshot 恢复；真实接口流程待测 |
-| 多人连续出价 | 竞拍运行中，至少 2 个用户窗口 | 用户 A、B 交替按固定幅度出价 | 当前价单调递增，最高出价人唯一，被超越用户收到提醒 | 2026-05-31：Day 11 服务级 e2e 覆盖多人连续出价、当前价单调、最高价唯一和 snapshot 排名恢复；真实多窗口提示待补测 |
-| 重复 clientBidId | 竞拍运行中 | 同一用户用相同 `clientBidId` 重复提交 | 不产生重复 Bid，返回幂等结果或 `DUPLICATE_CLIENT_BID` | 2026-05-31：Day 11 服务级 e2e 覆盖重复点击同一 `clientBidId` 返回幂等结果，不重复写 Bid / `BID_ACCEPTED` |
-| 最后 N 秒自动延时 | 配置防狙击窗口和延时时长 | 在结束前 N 秒提交有效出价 | `endTime` 延后，广播 `AUCTION_EXTENDED`，旧 timer 不再结算 | 2026-05-31：Day 11 服务级 e2e 覆盖最后窗口内有效出价延长 `endTime` 并重排 timer；真实浏览器广播待补测 |
-| 封顶价立即成交 | 配置封顶价 | 用户提交达到封顶价的有效出价 | 立即结算为 `ENDED_SOLD`，只生成一个订单 | 2026-05-31：Day 11 服务级 e2e 覆盖封顶立即成交、只生成一个订单、后续出价返回已结束 |
-| 主播取消竞拍 | 竞拍 `SCHEDULED` 或 `RUNNING` | 后台点击取消并填写原因 | 状态变为 `CANCELLED`，本进程结束 timer 被清理；广播 `AUCTION_CANCELLED` | 2026-05-31：Day 11 服务级 e2e 覆盖运行中取消、取消事件和后续出价返回已取消；真实浏览器广播待补测 |
-| 断线重连 snapshot 恢复 | 竞拍运行中且已有出价 | 断开移动端 WebSocket 后重连 | 重新拉取 snapshot，当前价、倒计时和领先状态正确 | 2026-05-31：Day 11 服务级 e2e 覆盖出价后 snapshot 当前价、最高出价人、我的排名和参与人数恢复；真实断网重连待补测 |
-| 订单唯一性 | 多用户并发冲击封顶价 | 同时提交多个达到封顶价的出价 | 仅一个最高出价人，仅一个订单 | 2026-05-25：服务端单元测试已覆盖并发封顶只接受一个出价、只创建一个订单 |
-| Redis/DB 对账审计 | 存在 Redis 热状态与 DB 竞拍快照 | 运行服务端等待对账 worker，或调用服务测试中的 `checkOnce` | 差异写入 `AUCTION_RECONCILIATION_MISMATCH` 审计，不自动改写业务状态 | 2026-06-01：`auction-consistency.service.test.ts` 覆盖无热状态不误报、热状态差异写审计；真实环境待补测 |
-| outbox 多实例发布语义 | 存在 `PENDING`、`FAILED` 或 lease 过期 `PROCESSING` 事件 | 发布器轮询并 claim 事件 | 事件成功后 `PUBLISHED`，失败后 `FAILED`，超过最大尝试进入 `DEAD_LETTER` | 2026-06-01：`auction-event-publisher.service.test.ts` 覆盖 claim/lease、失败重试和死信；多实例真实部署待补测 |
-| 用户端结果弹窗和模拟支付 | 当前用户中拍并收到 `ORDER_CREATED` | 观察移动端结果弹窗，点击“模拟支付” | 返回支付成功 toast，订单状态变为 `PAID` | 2026-05-31：真实 HTTP 已验证封顶成交后用户历史返回 `orderId`、订单详情可查、`mock-pay` 成功；浏览器打开 `http://localhost:5174/?userId=user_1&auctionId=...` 可恢复结果弹窗并显示“已完成支付” |
+| 本地依赖启动 | Docker 可用 | `docker compose up -d mysql redis` | MySQL、Redis healthy | 待最终执行 |
+| 数据库准备 | 依赖已启动 | `pnpm --filter @live-auction/server prisma:migrate`、`pnpm --filter @live-auction/server prisma:seed` | schema up to date，demo 数据重置 | 待最终执行 |
+| 后端健康检查 | server 已启动 | 打开 `http://localhost:3000/health` | `status=ok`，DB/Redis 均 ok | 待最终执行 |
+| 后台创建商品和竞拍 | admin 已启动 | 打开 `/admin/items/new`，填写商品和规则后提交 | 生成 `SCHEDULED` 竞拍，列表可见 | 2026-06-03：基本流程已手测跑通；本轮新增本地图片上传后待复测 |
+| 0 元起拍 | 创建页起拍价填 `0` | 提交后启动竞拍 | `currentPriceFen=0`，可按固定加价出价 | 单元测试已覆盖；真实页面待最终手测 |
+| 后台启动竞拍 | 存在 `SCHEDULED` 竞拍 | 点击启动 | 状态变为 `RUNNING`，移动端可见 | 服务级 e2e 已覆盖；真实页面待最终手测 |
+| 三用户实时出价 | 同一竞拍 `RUNNING` | 打开 user_1、user_2、user_3 三个移动端窗口交替出价 | 当前价单调递增，领先 / 被超越提示正确，第三用户可参与 | 2026-06-03：手测发现 user_3 触发一致性补偿；已补 demo bidder 自动创建和 seed user_3，待重启后复测 |
+| 防狙击延时 | 竞拍接近结束且设置延时 | 最后窗口内有效出价 | `endTime` 延后，页面收到延时提示 | 服务级 e2e 已覆盖；真实页面待最终手测 |
+| 封顶价立即成交 | 竞拍设置封顶价 | 用户出到封顶价 | 状态 `ENDED_SOLD`，仅生成一个订单 | 服务级 e2e 和 HTTP 压测一致性已覆盖；真实页面待最终手测 |
+| 无人流拍 | 启动短时竞拍且无人出价 | 等待到期并刷新移动端 | 状态 `ENDED_UNSOLD`，无订单，刷新后仍停留最新流拍场次 | 2026-06-03：手测发现刷新回退到上一场成交；已修复移动端默认场次选择，待重启后复测 |
+| 运行中取消 | 竞拍 `RUNNING` | 后台点击取消并填写原因 | 状态 `CANCELLED`，移动端禁用出价 | 服务级 e2e 已覆盖；真实页面待最终手测 |
+| 断线 / 刷新恢复 | 已有出价 | 刷新移动端或断开后重连 | snapshot 恢复当前价、排名、倒计时和订单结果 | 服务级 e2e 覆盖 snapshot；真实浏览器待最终手测 |
+| 结果弹窗和模拟支付 | 用户中拍 | 在移动端结果弹窗点击模拟支付 | 订单状态变为 `PAID`，后台订单可见 | 单窗口烟测曾通过；双窗口最终手测待补 |
+| 后台订单列表 | 已成交或已支付 | 打开 `/admin/orders` | 订单金额、买家、状态正确 | 服务级 e2e 已覆盖；真实页面待最终手测 |
+| 生产 compose | Docker 可用 | `docker compose -f docker-compose.prod.yml up -d --build` | server/admin/mobile 可访问 | 待新环境或最终本机执行 |
 
-## Day 4 补充检查
+## 2.1 2026-06-03 手测问题修复记录
 
-| 场景 | 前置条件 | 操作 | 预期结果 | 结果 |
+| 问题 | 根因 | 修复 | 复测步骤 | 状态 |
 | --- | --- | --- | --- | --- |
-| 服务启动恢复结束 timer | 数据库存在 `RUNNING` 且 `endTime` 未来的竞拍 | 重启服务端 | `AuctionSchedulerService` 扫描后重新注册 timer | 待测 |
-| 服务启动立即结算过期竞拍 | 数据库存在 `RUNNING` 且 `endTime` 已过去的竞拍 | 重启服务端 | 状态机立即结算为成交或流拍 | 单元测试覆盖结算分支，恢复扫描待集成测试 |
-| 管理端查询订单 | 已有 `ENDED_SOLD` 竞拍并生成订单 | 调用 `GET /admin/orders` 和 `GET /admin/orders/:orderId` | 返回 `PENDING_PAYMENT` 订单 DTO，金额为落槌价，并包含商品和买家展示字段 | Day 7 已接入管理端订单页面；真实接口待 Docker 环境补测 |
+| 流拍后刷新会回退到上一个已成交页面 | 移动端默认选择竞拍时优先 `ENDED_SOLD`，即使最新列表第一项是刚流拍的场次 | `selectAuction` 改为优先指定 `auctionId`、`RUNNING`、`SCHEDULED`，否则使用后端按 `updatedAt desc` 返回的最新场次 | 创建短时无人竞拍，等待流拍后刷新移动端 | 已修复，待复测 |
+| `user_3` 出价进入一致性补偿且刷新无效 | seed 只有 `user_1` / `user_2`，`user_3` 通过 demo header 后先被 Redis accepted，再因 DB 外键失败触发补偿 | seed 增加 `user_3`；`BidService` 在 Redis 原子出价前校验 / 自动创建 `user_N` demo bidder，非 demo 用户提前返回 `FORBIDDEN` | 重启后端，打开 `?userId=user_3&auctionId=...` 参与交替出价 | 已修复，待复测 |
+| 商品上架只能填写网络 URL，不能选择本地照片 | 后端只保存 http/https URL，管理端没有上传入口 | 新增 `POST /admin/uploads/item-image`，管理端选择本地图片后上传到 `/uploads/items/...` 并自动填入 URL | 在后台创建页选择本地 jpg/png/webp/gif，确认预填 URL 并创建竞拍 | 已修复，待复测 |
 
-## Day 5 自动化覆盖
+## 3. 压测手工记录
 
-已通过 `apps/server/src/bid/bid.service.test.ts` 覆盖：
+| 场景 | 命令 | 通过标准 | 当前记录 |
+| --- | --- | --- | --- |
+| HTTP 30 并发出价 | `pnpm perf:day12` | Redis / DB / snapshot / 订单一致 | 已记录：24 accepted，p95 873.41ms，一致性校验通过 |
+| HTTP 100 并发出价 | `$env:DAY12_BID_ATTEMPTS='100'; pnpm perf:day12; Remove-Item Env:DAY12_BID_ATTEMPTS` | Redis / DB / snapshot / 订单一致 | 已记录：80 accepted，p95 3516.74ms |
+| Socket.IO 100 连接 | `$env:SOCKET_CONNECTIONS='100'; pnpm perf:socket; Remove-Item Env:SOCKET_CONNECTIONS` | 连接、join、snapshot、PING/PONG 成功率达标 | 已记录：100% 成功，p95 连接 55.47ms，快照 183.32ms |
+| Socket.IO 1000 连接 | `$env:SOCKET_CONNECTIONS='1000'; pnpm perf:socket; Remove-Item Env:SOCKET_CONNECTIONS` | 连接、join、snapshot、PING/PONG 成功率达标 | 已记录：100% 成功，p95 连接 501.42ms，快照 1715.04ms |
 
-- 0 元起拍后的有效出价。
-- 低价、非法加价幅度、最高出价人重复出价、超过封顶价、竞拍结束后出价。
-- 重复 `clientBidId` 已落库幂等和并发热幂等。
-- 防狙击窗口内延长 `endTime` 并重排结束 timer。
-- 达到封顶价立即成交并创建一个订单。
-- 30 和 100 并发出价，当前价单调递增、最高出价人唯一、`bidCount` 与 accepted Bid 数量一致。
+## 4. 收尾校验命令
 
-## Day 6 验收入口
+```powershell
+pnpm typecheck
+pnpm test
+pnpm test:e2e
+pnpm lint
+pnpm build
+```
 
-已通过 `apps/server/src/realtime/*.test.ts` 覆盖：
+如 Docker 环境已启动，再补：
 
-- 用户连接后自动加入 `user:{userId}`。
-- 用户可加入 `room:{roomId}` 和 `auction:{auctionId}`。
-- 出价成功 outbox 只向 `auction:{auctionId}` 发送 `BID_ACCEPTED`。
-- `OUTBID` 和 `LEADING` 只发送给相关 `user:{userId}`。
-- 延时出价派发 `AUCTION_EXTENDED`。
-- 重连后 `requestSnapshot` 返回包含 `serverSeq` 的最新 snapshot。
-- outbox 发布成功标记 `PUBLISHED`，失败标记 `FAILED` 并记录审计日志。
+```powershell
+pnpm perf:day12
+$env:DAY12_BID_ATTEMPTS='100'; pnpm perf:day12; Remove-Item Env:DAY12_BID_ATTEMPTS
+```
 
-仍需后续端到端或手工验证：
-
-- 两个真实浏览器窗口通过 Socket.IO 实时同步。
-- 人为构造乱序 / 跳号事件，验证移动端页面按 `serverSeq` 丢弃旧事件并在跳号时重拉 snapshot。
-- 真实 timer 到期或封顶成交后，移动端收到竞拍结束事件并禁用出价按钮。
-
-## Day 7 自动化和页面检查
-
-已覆盖：
-
-- `apps/server/src/auction/auction-state-machine.service.test.ts` 覆盖取消竞拍写入 `AUCTION_CANCELLED` outbox。
-- `apps/server/src/realtime/auction-event-publisher.service.test.ts` 继续覆盖取消事件广播到 `room:{roomId}` 和 `auction:{auctionId}`。
-- `apps/admin` 类型检查覆盖管理端 API DTO 和页面状态。
-- 浏览器打开 `http://localhost:5173/`，确认管理端标题、竞拍列表、订单 tab 渲染，无前端控制台错误。
-
-待补真实环境检查：
-
-- 2026-05-27：本机 Docker Desktop 未运行，无法启动 MySQL/Redis，因此浏览器里真实 API 返回 `Failed to fetch`；后续启动 Docker 后补测竞拍列表、启动、取消和订单列表。
-- 2026-05-27：Docker 已启动后补测通过。`/health` 返回 DB/Redis `ok`；管理端页面真实加载 `GET /admin/auctions` 数据，无前端控制台错误；`POST /admin/auctions/auction_1/start` 成功进入 `RUNNING`；`GET /auctions/auction_1/snapshot` 初次联调发现 `RealtimeController` 未显式注入 `AuctionSnapshotService` 导致 500，已修复并补单元测试；`POST /admin/auctions/auction_1/cancel` 成功返回 `CANCELLED`；最后执行 seed 恢复 `auction_1` 为 `SCHEDULED`。
-
-## Day 8 移动端 mock 页面检查
-
-已覆盖：
-
-- `apps/mobile` 类型检查覆盖直播间页面组件和 mock service 类型边界。
-- `apps/mobile` production build 产物生成通过。
-- 浏览器打开 `http://localhost:5174/`，确认主播信息、直播背景、评论流、底部互动区和竞拍小卡片渲染。
-- 点击竞拍小卡片可打开底部半屏竞拍面板，关闭按钮和遮罩可关闭。
-- 面板内 `+` / `-` 按固定加价幅度调整本次出价，金额不会低于下一口价或超过封顶价。
-- 点击“立即出价”后本地 snapshot 更新当前价、我的出价、排名、评论流和 toast；当前用户领先时出价按钮禁用。
-- 页面会触发一次本地模拟对手超越，展示“你已被超越”，并恢复可继续出价的状态。
-
-## Day 9 移动端真实联动检查
-
-已覆盖：
-
-- `apps/mobile` 类型检查覆盖真实 REST service、Socket.IO client 封装和页面状态接入。
-- `apps/mobile` production build 产物生成通过。
-- 移动端进入直播间后会拉取真实 `GET /rooms/:roomId/auctions`、`GET /auctions/:auctionId` 和 `GET /auctions/:auctionId/snapshot`。
-- 移动端提交真实 `POST /auctions/:auctionId/bids`，生成稳定 `clientBidId`，并展示后端错误消息。
-- 移动端通过 Socket.IO 加入 `room:{roomId}`、`auction:{auctionId}`，请求 `AUCTION_SNAPSHOT`，并处理 `BID_ACCEPTED`、`LEADING`、`OUTBID`、`AUCTION_EXTENDED`、`AUCTION_ENDED`、`ORDER_CREATED` 和 `AUCTION_CANCELLED`。
-- 移动端用 `serverTime` 校准倒计时，用 `serverSeq` 丢弃旧事件并在跳号时重新拉 snapshot。
-- 2026-05-29：Docker MySQL/Redis、服务端和移动端 dev server 环境下，seed 后启动 `auction_1`，`user_1` 通过真实 HTTP 出价到 ¥10，浏览器打开 `http://localhost:5174/?userId=user_2` 拉取真实 snapshot，面板提交 ¥20 成功，页面更新当前价、排行榜、我的排名和领先禁用状态；浏览器 error/warning 日志为空。
-
-待补真实环境检查：
-
-- 打开 `http://localhost:5174/?userId=user_1&auctionId=...` 和 `http://localhost:5174/?userId=user_2&auctionId=...`，交替出价，验证当前价、排行榜、领先 / 被超越提示同步。2026-05-31：单窗口结果弹窗和 `auctionId` 定向进入已通过浏览器烟测，双窗口交替出价仍需最终手测。
-- 手动断开移动端网络或刷新页面，验证重连后 snapshot 恢复最新价格、倒计时和我的排名。
-- 等待到期或冲击封顶价，验证竞拍结束后移动端禁用出价并展示成交 / 流拍状态。
-
-## Day 10 管理端创建表单检查
-
-已覆盖：
-
-- `apps/admin` 类型检查覆盖创建表单状态、金额字符串转整数分、卖点解析和 API DTO 类型。
-- `apps/admin` production build 产物生成通过。
-- 浏览器打开 `http://localhost:5173/admin/items/new`，确认创建页核心字段渲染且前端 error/warning 日志为空。
-- `pnpm test:e2e` 覆盖创建商品、创建 0 元起拍竞拍、启动竞拍、房间竞拍列表可见、封顶成交、后台订单列表可见。
-- 管理端新增“商品上架” tab，路径 `/admin/items` 和 `/admin/items/new` 会进入创建页。
-- 创建页覆盖商品名称、商品图片 URL、商品介绍、卖点标签、直播间 ID、起拍价、固定加价、竞拍时长、封顶价、防狙击窗口、延时时长和最大延时次数。
-- 表单提交前会做轻量输入校验；后端仍负责最终规则校验和状态机兜底。
-
-待补真实环境检查：
-
-- 启动 MySQL、Redis、server 和 admin 后，通过页面创建新商品和 0 元起拍竞拍，确认列表出现 `SCHEDULED` 竞拍。
-- 点击新竞拍“启动”，再打开移动端确认 `GET /rooms/:roomId/auctions` 能看到启动后的竞拍。
-- 对新竞拍完成一次真实出价和结算，确认后台订单列表出现成交订单。
-
-## Day 11 服务级异常场景覆盖
-
-已通过 `apps/server/src/day11-auction-scenarios.e2e.test.ts` 覆盖：
-
-- 无人出价到期后进入 `ENDED_UNSOLD`，订单数为 0。
-- 一人有效出价到期后进入 `ENDED_SOLD`，生成唯一订单，snapshot 可恢复最高出价和我的排名。
-- 多人连续出价后当前价单调递增，最高出价人唯一，参与人数和排行榜正确。
-- 最高出价人再次出价返回 `BIDDER_ALREADY_LEADING`，用户消息为“当前您已是最高价”。
-- 防狙击窗口内有效出价延长 `endTime` 并重排 timer。
-- 达到封顶价立即成交，后续出价返回 `AUCTION_ALREADY_ENDED`。
-- 主播取消运行中竞拍后写入 `AUCTION_CANCELLED`，后续出价返回 `AUCTION_CANCELLED`。
-- 重复点击同一 `clientBidId` 返回幂等结果，不重复写入 Bid 或 `BID_ACCEPTED`。
-
-仍需真实环境补测：
-
-- Docker MySQL/Redis/server/admin/mobile 全链路下，通过管理端页面创建商品和竞拍，再用两个移动端窗口交替出价。
-- 人为刷新或断开移动端 Socket.IO 后重连，观察页面是否以最新 snapshot 恢复。
-- 真实浏览器收到 `AUCTION_EXTENDED`、`AUCTION_CANCELLED`、`AUCTION_ENDED` 后的 UI 禁用和提示效果。
-
-## Day 12 真实 HTTP 并发压测
-
-已覆盖：
-
-- `pnpm perf:day12` 默认 30 并发出价，真实 server + MySQL + Redis 环境下通过。
-- `DAY12_BID_ATTEMPTS=100 pnpm perf:day12` 真实 100 并发出价通过。
-- 脚本自动创建商品和竞拍、启动竞拍、准备 bidder 用户、并发出价、读取 admin 竞拍详情、snapshot、订单列表和 Redis 热 key 做一致性校验。
-- 30 并发结果：23 accepted，7 个受控 `BID_AMOUNT_TOO_LOW`，平均 546.05ms，p95 930.60ms，Redis/DB/snapshot/订单一致。
-- 100 并发结果：80 accepted，20 个受控 `BID_AMOUNT_TOO_LOW`，平均 1905.17ms，p95 3516.74ms，Redis/DB/snapshot/订单一致。
-
-压测中修复：
-
-- Redis Lua 真实 payload 中 `previousUserLeaderboardAmountFen` 的 nil/字符串解析导致 500。
-- Redis accepted 后 DB 并发持久化乱序导致 `BID_PERSISTENCE_FAILED` 和热状态无法回滚。
-
-仍需补测：
-
-- 1000 Socket.IO 连接压测。
-- 生产构建模式下的同场景压测。
-- 多轮压测平均值和机器配置补全。
-- 单竞拍出价处理队列补强后，100 并发 p95 升至约 3.52s；Day14 演示可接受，生产优化需要跨进程队列或 claim 机制。
-
-## 2026-06-01 最终补强检查
-
-已覆盖：
-
-- `BidService` 在本进程队列外增加 Redis 分布式锁，锁等待超时返回 `BID_CONCURRENCY_BUSY`。
-- `AuctionEventPublisherService` 增加 outbox claim/lease、最大尝试次数和 `DEAD_LETTER`。
-- `AuctionConsistencyService` 增加 Redis/DB 对账审计。
-- 管理端创建表单改用 `POST /admin/auctions/with-item`，避免商品孤儿记录。
-- 新增 `pnpm perf:socket` Socket.IO 连接压测脚本。
-- 新增 `docker-compose.prod.yml`、三端 Dockerfile 和 GitHub Actions CI。
-
-仍需真实环境补测：
-
-- `docker compose -f docker-compose.prod.yml up -d --build` 一键生产 compose 启动。
-- `pnpm perf:socket` 的 100 和 1000 连接真实结果。
-- 两个真实移动端窗口交替出价、断线重连和结束事件 UI 禁用。
-
-## 记录格式
+## 5. 记录格式
 
 ```txt
-日期：
+日期：2026.6.3
 环境：
-场景：
+场景：进行手工测试
 结果：
+    健康状态：{"status":"ok","service":"live-auction-server","timestamp":"2026-06-03T09:50:22.737Z","checks":{"database":{"status":"ok","latencyMs":55},"redis":{"status":"ok","latencyMs":310}}}
 问题：
+    1.流拍后刷新会退回上一个已成交的页面，而非最新的流拍页面；已修复移动端默认竞拍选择逻辑，待复测。
+    2.三个人无法共同竞拍，user_3点击加价的时候显示“竞拍进入一致性补偿，请拉取最新快照后重试”，但刷新后仍然显示该错误；已修复 demo bidder 处理，待复测。
+    3.上架商品选择照片时我想可以使用本地照片直接放进去，但现在只支持url；已新增本地图片上传，待复测。
 证据：
 ```

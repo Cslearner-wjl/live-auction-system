@@ -5,10 +5,12 @@ import {
   AuctionStatus as PrismaAuctionStatus,
   BidStatus as PrismaBidStatus,
   OrderStatus as PrismaOrderStatus,
+  UserRole as PrismaUserRole,
   type AuctionRule,
   type AuctionSession,
   type Bid,
-  type Order
+  type Order,
+  type User
 } from "@prisma/client";
 import { AuctionErrorCode } from "@live-auction/shared";
 import { AuctionSchedulerService } from "../auction/auction-scheduler.service";
@@ -45,6 +47,7 @@ class FakePrisma {
     serverSeq: number;
   }> = [];
   readonly orders = new Map<string, Order>();
+  readonly users = new Map<string, Pick<User, "id" | "displayName" | "maskedName" | "role">>();
   readonly auditLogs: Array<Record<string, unknown>> = [];
   readonly bidCreateDelayByClientBidId = new Map<string, number>();
   failNextBidCreate = false;
@@ -181,6 +184,30 @@ class FakePrisma {
       });
 
       return { id: `event_${this.events.length}`, ...data };
+    }
+  };
+
+  readonly user = {
+    findUnique: async ({
+      where
+    }: {
+      where: { id: string };
+      select?: Record<string, boolean>;
+    }): Promise<Pick<User, "id" | "role"> | null> => {
+      const user = this.users.get(where.id);
+      return user ? { id: user.id, role: user.role } : null;
+    },
+    create: async ({
+      data
+    }: {
+      data: Pick<User, "id" | "displayName" | "maskedName" | "role">;
+    }): Promise<Pick<User, "id" | "displayName" | "maskedName" | "role">> => {
+      if (this.users.has(data.id)) {
+        throw { code: "P2002" };
+      }
+
+      this.users.set(data.id, data);
+      return data;
     }
   };
 
@@ -476,6 +503,57 @@ describe("BidService.placeBid", () => {
     assert.equal(prisma.bids.size, 1);
     assert.equal(prisma.events.length, 1);
     assert.equal(prisma.events[0]?.type, PrismaAuctionEventType.BID_ACCEPTED);
+  });
+
+  it("creates a missing demo bidder before touching the Redis bid state", async () => {
+    const { prisma, atomicStore, service } = makeBidService();
+
+    prisma.users.delete("user_3");
+    assert.equal(prisma.users.has("user_3"), false);
+
+    const result = await service.placeBid("auction_1", "user_3", {
+      amountFen: 1000,
+      clientBidId: "new_demo_bidder"
+    });
+
+    assert.equal(result.highestBidderId, "user_3");
+    assert.equal(prisma.users.get("user_3")?.role, PrismaUserRole.BIDDER);
+    assert.equal(atomicStore.getState("auction_1")?.highestBidderId, "user_3");
+  });
+
+  it("continues when another request creates the same demo bidder first", async () => {
+    const { prisma, service } = makeBidService();
+
+    prisma.users.delete("user_3");
+    const originalCreate = prisma.user.create;
+    prisma.user.create = async ({ data }) => {
+      prisma.users.set(data.id, data);
+      throw { code: "P2002" };
+    };
+
+    const result = await service.placeBid("auction_1", "user_3", {
+      amountFen: 1000,
+      clientBidId: "raced_demo_bidder"
+    });
+
+    prisma.user.create = originalCreate;
+    assert.equal(result.highestBidderId, "user_3");
+    assert.equal(prisma.users.get("user_3")?.role, PrismaUserRole.BIDDER);
+  });
+
+  it("rejects non-demo missing users before Redis accepts the bid", async () => {
+    const { atomicStore, service } = makeBidService();
+
+    await assert.rejects(
+      () =>
+        service.placeBid("auction_1", "missing_user", {
+          amountFen: 1000,
+          clientBidId: "missing_user_bid"
+        }),
+      (error) => hasApiCode(error, AuctionErrorCode.Forbidden)
+    );
+
+    assert.equal(atomicStore.getState("auction_1"), undefined);
   });
 
   it("continues serverSeq after the auction start event", async () => {
@@ -927,6 +1005,14 @@ function makeBidService(
     rule
   });
   prisma.auctions.set(auction.id, auction);
+  for (const index of Array.from({ length: 120 }, (_, itemIndex) => itemIndex + 1)) {
+    prisma.users.set(`user_${index}`, {
+      id: `user_${index}`,
+      displayName: `Demo Bidder ${index}`,
+      maskedName: `User ${index}`,
+      role: PrismaUserRole.BIDDER
+    });
+  }
 
   const atomicStore = new FakeAtomicStore();
   const redisLock = new FakeRedisLock();

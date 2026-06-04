@@ -287,3 +287,39 @@
 | human-reviewed decisions | 对账 worker 只检测和写审计，不自动修复价格、赢家、订单；出价锁先用 Redis lock 覆盖多实例关键段，后续高吞吐再评估 Stream/BullMQ/DB claim；生产 compose 可用于本地演示，真实生产迁移和 seed 应拆成独立 SOP；Socket.IO 脚本新增但不把未执行的 100/1000 结果写成完成 |
 | tests run | `pnpm install --lockfile-only`、`pnpm install`、`pnpm --filter @live-auction/server prisma:generate`、`pnpm --filter @live-auction/shared build`、`pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/server test`、`pnpm typecheck`、`pnpm test`、`pnpm test:e2e`、`pnpm lint`、`pnpm build`、`docker compose -f docker-compose.prod.yml config`、`git diff --check`、secrets 关键词扫描、确认 `docs/learning/` 仍为 ignored |
 | known issues | 生产 compose 尚未实际 build/up，Socket.IO 100/1000 真实压测和浏览器双窗口/断网重连最终手测仍需后续记录；真实认证、限流、Playwright 全链路和自动修复型对账仍未实现 |
+
+## 2026-06-03
+
+| 字段 | 内容 |
+| --- | --- |
+| task | 整理 `docs/` 文档，删减过时和重复材料，并按最终演示验收流程补齐提交文档 |
+| prompt summary | 用户要求全面审视代码库和 `docs/demo-script.md` 第五项，删除或删减过时重复文档，补齐最终演示验收材料 |
+| files changed | `README.md`、`docs/README.md`、`docs/final-acceptance.md`、`docs/demo-script.md`、`docs/manual-test.md`、`docs/performance-report.md`、`docs/final-deployment-plan.md`、`docs/api.md`、`docs/architecture.md`、`docs/websocket-events.md`、`docs/ai-codex-log.md`、删除 `docs/progress.md`、`docs/development-process.md`、`docs/day10-result.md`、`docs/day14-demo-checklist.md`、`docs/weekly-report-2026-06-01.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | 文档索引重组、最终验收 14 项材料、5 分钟演示脚本、手工测试清单、性能报告口径、最终部署差距评估、README 快速启动说明和过期契约修正 |
+| human-reviewed decisions | 保留契约文档和真实证据入口，删除 Day 过程性重复文档；不把公网 Demo、演示视频、Socket.IO 100/1000 结果、Playwright、生产 compose 实跑、AI 卖点功能写成已完成；历史 AI 日志中的旧文件名作为历史记录保留 |
+| tests run | `pnpm typecheck`、`pnpm test`、`pnpm test:e2e`、`pnpm lint`、`pnpm build`、`git diff --check`、`git check-ignore -v docs\\learning\\engineering-experience.md`、文档过期引用扫描 |
+| known issues | 真实浏览器双窗口交替出价、断线重连、Socket.IO 100/1000 连接压测、生产 compose 新环境实跑、真实认证 / 限流、Playwright 全链路和自动修复型对账仍待后续补齐 |
+
+## 2026-06-03
+
+| 字段 | 内容 |
+| --- | --- |
+| task | 修复最终手测暴露的问题，并更新手工测试文档 |
+| prompt summary | 用户已按 `docs/manual-test.md` 完成基本手测，要求修复记录的问题：流拍刷新回退、第三个用户无法竞拍、本地图片无法直接选择，并同步更新文档 |
+| files changed | `apps/mobile/src/mobile-auction-service.ts`、`apps/server/src/bid/bid.service.ts`、`apps/server/src/bid/bid.service.test.ts`、`apps/server/prisma/seed.ts`、`apps/server/src/admin/admin-uploads.controller.ts`、`apps/server/src/admin/admin-uploads.service.ts`、`apps/server/src/admin/admin.module.ts`、`apps/server/src/common/upload-paths.ts`、`apps/server/src/main.ts`、`apps/admin/src/App.tsx`、`apps/admin/src/styles.css`、`README.md`、`docs/api.md`、`docs/manual-test.md`、`docs/performance-report.md`、`docs/demo-script.md`、`docs/final-acceptance.md`、`docs/final-deployment-plan.md`、`docs/README.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | 移动端默认场次选择修复、demo bidder 自动创建、`user_3` seed、管理端本地图片上传接口和表单入口、手测问题修复记录、性能证据口径同步 |
+| human-reviewed decisions | 流拍刷新问题只调整客户端默认选择优先级，不改变后端列表排序；第三用户问题在 Redis 原子出价前校验 / 创建 demo bidder，避免先 accepted 再 DB 外键失败；demo bidder 创建补唯一约束竞态兜底；本地图片上传限定为 demo 静态目录，并校验 base64 与图片文件头，生产仍应使用对象存储或 CDN |
+| tests run | `pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/admin typecheck`、`pnpm --filter @live-auction/mobile typecheck`、`git diff --check`、`pnpm --filter @live-auction/server test`、`pnpm typecheck`、`pnpm test:e2e`、`pnpm test`、`pnpm lint`、`pnpm build` |
+| known issues | 三个手测修复仍需重启后端 / 前端后按 `docs/manual-test.md` 复测；本地图片上传是演示能力，不适合直接作为公网生产文件存储 |
+
+## 2026-06-04
+
+| 字段 | 内容 |
+| --- | --- |
+| task | 审查当前 diff，修复审查发现的边界问题，并准备推送 GitHub |
+| prompt summary | 用户要求审查 diff，确认无 bug 后推送至 GitHub |
+| files changed | `apps/server/src/bid/bid.service.ts`、`apps/server/src/bid/bid.service.test.ts`、`apps/server/src/admin/admin-uploads.service.ts`、`apps/server/src/admin/admin-uploads.service.test.ts`、`docs/api.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | demo bidder 唯一约束竞态兜底、上传 base64 严格校验、图片文件头匹配校验、上传服务测试和 diff 审查日志 |
+| human-reviewed decisions | 不回退用户已有文档清理和演示功能变更；只补审查发现的真实边界风险；上传仍定位为本地演示能力，生产需对象存储 / CDN / 内容安全策略 |
+| tests run | `git diff --check`、`pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/admin typecheck`、`pnpm --filter @live-auction/mobile typecheck`、`pnpm --filter @live-auction/server test`、`pnpm typecheck`、`pnpm test`、`pnpm test:e2e`、`pnpm lint`、`pnpm build` |
+| known issues | 真实浏览器三用户交替出价、流拍刷新和本地图片上传仍需重启服务后按手工清单复测；本地上传未实现鉴权外的配额、病毒扫描、对象存储或 CDN |

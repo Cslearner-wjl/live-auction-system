@@ -73,6 +73,21 @@ async function main() {
     }
   });
 
+  await prisma.user.upsert({
+    where: { id: "user_3" },
+    update: {
+      displayName: "Demo Bidder 3",
+      maskedName: "User 3",
+      role: UserRole.BIDDER
+    },
+    create: {
+      id: "user_3",
+      displayName: "Demo Bidder 3",
+      maskedName: "User 3",
+      role: UserRole.BIDDER
+    }
+  });
+
   const room = await prisma.liveRoom.upsert({
     where: { id: "room_1" },
     update: {

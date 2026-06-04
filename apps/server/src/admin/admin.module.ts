@@ -7,10 +7,22 @@ import { AdminItemsController } from "./admin-items.controller";
 import { AdminItemsService } from "./admin-items.service";
 import { AdminOrdersController } from "./admin-orders.controller";
 import { AdminOrdersService } from "./admin-orders.service";
+import { AdminUploadsController } from "./admin-uploads.controller";
+import { AdminUploadsService } from "./admin-uploads.service";
 
 @Module({
   imports: [PrismaModule, AuctionModule],
-  controllers: [AdminItemsController, AdminAuctionsController, AdminOrdersController],
-  providers: [AdminItemsService, AdminAuctionsService, AdminOrdersService]
+  controllers: [
+    AdminItemsController,
+    AdminAuctionsController,
+    AdminOrdersController,
+    AdminUploadsController
+  ],
+  providers: [
+    AdminItemsService,
+    AdminAuctionsService,
+    AdminOrdersService,
+    AdminUploadsService
+  ]
 })
 export class AdminModule {}

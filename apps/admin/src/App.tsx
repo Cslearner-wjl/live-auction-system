@@ -112,6 +112,11 @@ interface ApiErrorPayload {
   details?: Record<string, unknown>;
 }
 
+interface UploadImageResponse {
+  url: string;
+  path: string;
+}
+
 const initialCreateAuctionForm: CreateAuctionForm = {
   roomId: "room_1",
   name: "",
@@ -169,6 +174,7 @@ export function App() {
   const [busyAuctionId, setBusyAuctionId] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState<CreateAuctionForm>(initialCreateAuctionForm);
   const [createSubmitting, setCreateSubmitting] = useState(false);
+  const [imageUploading, setImageUploading] = useState(false);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -260,6 +266,37 @@ export function App() {
       setMessage(toErrorMessage(error));
     } finally {
       setCreateSubmitting(false);
+    }
+  }
+
+  async function uploadLocalImage(file: File | undefined) {
+    if (!file) {
+      return;
+    }
+
+    setImageUploading(true);
+    setMessage(null);
+    setMessageTone("info");
+
+    try {
+      const base64 = await readFileAsBase64(file);
+      const result = await requestJson<UploadImageResponse>("/admin/uploads/item-image", {
+        method: "POST",
+        body: JSON.stringify({
+          fileName: file.name,
+          contentType: file.type,
+          base64
+        })
+      });
+
+      updateCreateForm("imageUrl", result.url);
+      setMessageTone("info");
+      setMessage("本地图片已上传，商品图片 URL 已自动填入。");
+    } catch (error: unknown) {
+      setMessageTone("error");
+      setMessage(toErrorMessage(error));
+    } finally {
+      setImageUploading(false);
     }
   }
 
@@ -504,6 +541,16 @@ export function App() {
                     placeholder="https://example.com/item.png"
                     required
                   />
+                </label>
+                <label>
+                  <span>本地图片</span>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    disabled={imageUploading}
+                    onChange={(event) => void uploadLocalImage(event.currentTarget.files?.[0])}
+                  />
+                  <small>{imageUploading ? "上传中..." : "选择后会自动上传并填入 URL"}</small>
                 </label>
                 <label className="span-2">
                   <span>商品介绍</span>
@@ -942,4 +989,18 @@ function formatDateTime(value: string): string {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败";
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const commaIndex = result.indexOf(",");
+      resolve(commaIndex >= 0 ? result.slice(commaIndex + 1) : result);
+    };
+    reader.onerror = () => reject(new Error("读取本地图片失败"));
+    reader.readAsDataURL(file);
+  });
 }

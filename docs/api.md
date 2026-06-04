@@ -722,9 +722,32 @@ curl http://localhost:3000/admin/orders/order_1 \
   -H "X-Demo-Role: admin"
 ```
 
+### POST /admin/uploads/item-image
+
+上传本地商品图片，返回可直接填写到商品 `imageUrl` 的静态 URL。该接口用于本地演示和管理端商品上架，不参与竞拍状态机。
+
+Request DTO：
+
+| 字段 | 类型 | 必填 | 校验 |
+| --- | --- | --- | --- |
+| `fileName` | string | 否 | 原始文件名，仅用于推断扩展名 |
+| `contentType` | string | 是 | `image/jpeg`、`image/png`、`image/webp`、`image/gif` |
+| `base64` | string | 是 | 图片二进制的 base64，解码后最大 3MB，文件头必须匹配 `contentType` |
+
+200：
+
+```json
+{
+  "url": "http://localhost:3000/uploads/items/1780470000000-uuid.jpg",
+  "path": "/uploads/items/1780470000000-uuid.jpg"
+}
+```
+
+错误：`400 VALIDATION_FAILED`、`401 UNAUTHORIZED`、`403 FORBIDDEN`。
+
 ### POST /admin/ai/generate-selling-points
 
-生成商品卖点和直播话术。无 AI API Key 时返回确定性 mock 内容。
+目标契约：生成商品卖点和直播话术。当前代码库未实现该路由，不纳入最终主流程演示；后续实现时必须从后端读取 AI 环境变量，缺少 AI API Key 时返回确定性 mock 内容，不得从前端直接调用 AI。
 
 Request DTO：
 
@@ -735,7 +758,7 @@ Request DTO：
 | `startPriceFen` | integer | 是 | 大于等于 `0` |
 | `targetAudience` | string | 否 | 最多 80 字符 |
 
-200：
+后续实现后的 200：
 
 ```json
 {
@@ -746,9 +769,9 @@ Request DTO：
 }
 ```
 
-错误：`400 VALIDATION_FAILED`、`401 UNAUTHORIZED`、`403 FORBIDDEN`。
+错误：`400 VALIDATION_FAILED`、`401 UNAUTHORIZED`、`403 FORBIDDEN`、`501`。
 
-curl：
+后续实现后的 curl：
 
 ```bash
 curl -X POST http://localhost:3000/admin/ai/generate-selling-points \

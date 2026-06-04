@@ -545,8 +545,6 @@ function selectAuction(
     preferred ??
     items.find((item) => item.status === AuctionStatus.Running) ??
     items.find((item) => item.status === AuctionStatus.Scheduled) ??
-    items.find((item) => item.status === AuctionStatus.EndedSold) ??
-    items.find((item) => item.status === AuctionStatus.EndedUnsold) ??
     items[0] ??
     null
   );

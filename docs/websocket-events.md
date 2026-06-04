@@ -1,6 +1,6 @@
 # WebSocket 事件契约
 
-本文档定义直播竞拍系统的 WebSocket 契约。事件名必须与 `packages/shared/src/websocket-events.ts` 保持一致。Day 6 服务端已基于 Socket.IO 实现 gateway、房间加入、snapshot 请求、心跳、Socket.IO 出价和 outbox 广播；Day 9 移动端已接入真实 Socket.IO 事件，并以 snapshot 作为权威状态来源。
+本文档定义直播竞拍系统的 WebSocket 契约。事件名必须与 `packages/shared/src/websocket-events.ts` 保持一致。当前服务端已基于 Socket.IO 实现 gateway、房间加入、snapshot 请求、心跳、Socket.IO 出价和 outbox 广播；移动端已接入真实 Socket.IO 事件，并以 snapshot 作为权威状态来源。
 
 ## 1. 房间约定
 
@@ -31,7 +31,7 @@ connect
 
 客户端不能依赖历史事件恢复状态。首次加载和重连后必须拉取 snapshot。
 
-Day 6 demo 身份：
+当前 demo 身份：
 
 Socket.IO 客户端优先通过 `handshake.auth` 传身份：
 
@@ -351,15 +351,15 @@ Socket.IO 出价。HTTP 出价接口仍是当前移动端主流程；该事件�
 
 ## 6. 测试要求
 
-Day 6 已通过服务端单元测试覆盖：
+当前已通过服务端单元测试覆盖：
 
 - 用户可加入直播间和竞拍房间。
 - `BID_ACCEPTED` 只到达同一竞拍房间用户。
 - `OUTBID` 和 `LEADING` 只到达对应用户房间。
 - 重连后可以拉取包含 `serverSeq` 的最新 snapshot。
-- outbox 发布成功标记 `PUBLISHED`，发布失败标记 `FAILED` 并记录审计日志；Day 10 起发布器会重试 `FAILED` 事件，成功后改为 `PUBLISHED`。
+- outbox claim 后发布事件，成功标记 `PUBLISHED`；发布失败会释放 claim 并标记 `FAILED` 或 `DEAD_LETTER`，同时记录 `AUCTION_EVENT_PUBLISH_FAILED` 审计日志。
 
-Day 9 移动端已实现的客户端处理：
+当前移动端已实现的客户端处理：
 
 - 连接后通过 `handshake.auth` 传 `userId` 和 `role: bidder`。
 - 加入 `room:{roomId}` 和 `auction:{auctionId}` 后请求 `AUCTION_SNAPSHOT`。

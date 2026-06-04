@@ -4,6 +4,7 @@ import {
   AuctionStatus as PrismaAuctionStatus,
   BidStatus as PrismaBidStatus,
   OutboxStatus as PrismaOutboxStatus,
+  UserRole as PrismaUserRole,
   type AuctionRule,
   type AuctionSession,
   type Bid,
@@ -125,6 +126,8 @@ export class BidService {
     userId: string,
     input: ReturnType<typeof parsePlaceBid>
   ): Promise<PlaceBidResultDto> {
+    await this.ensureDemoBidderExists(userId);
+
     const existingBid = await this.findExistingBid(auctionId, input.clientBidId);
 
     if (existingBid) {
@@ -241,6 +244,83 @@ export class BidService {
           auctionId,
           clientBidId
         }
+      }
+    });
+  }
+
+  private async ensureDemoBidderExists(userId: string): Promise<void> {
+    const existing = await this.findUserRole(userId);
+
+    if (existing?.role === PrismaUserRole.BIDDER) {
+      return;
+    }
+
+    if (existing) {
+      throw new ApiException(
+        HttpStatus.FORBIDDEN,
+        AuctionErrorCode.Forbidden,
+        "当前用户不是竞拍用户",
+        { userId, role: existing.role }
+      );
+    }
+
+    const demoUserMatch = /^user_(\d{1,4})$/.exec(userId);
+
+    if (!demoUserMatch) {
+      throw new ApiException(
+        HttpStatus.FORBIDDEN,
+        AuctionErrorCode.Forbidden,
+        "竞拍用户不存在，请使用 user_1、user_2、user_3 等 demo 用户",
+        { userId }
+      );
+    }
+
+    const suffix = demoUserMatch[1];
+    try {
+      await this.prisma.user.create({
+        data: {
+          id: userId,
+          displayName: `Demo Bidder ${suffix}`,
+          maskedName: `User ${suffix}`,
+          role: PrismaUserRole.BIDDER
+        }
+      });
+    } catch (error: unknown) {
+      if (!isPrismaUniqueConstraintError(error)) {
+        throw error;
+      }
+
+      const racedUser = await this.findUserRole(userId);
+      if (racedUser?.role === PrismaUserRole.BIDDER) {
+        return;
+      }
+
+      if (racedUser) {
+        throw new ApiException(
+          HttpStatus.FORBIDDEN,
+          AuctionErrorCode.Forbidden,
+          "当前用户不是竞拍用户",
+          { userId, role: racedUser.role }
+        );
+      }
+
+      throw new ApiException(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        AuctionErrorCode.BidConcurrencyBusy,
+        "竞拍用户初始化繁忙，请稍后重试",
+        { userId }
+      );
+    }
+  }
+
+  private async findUserRole(
+    userId: string
+  ): Promise<{ id: string; role: PrismaUserRole } | null> {
+    return this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        role: true
       }
     });
   }
