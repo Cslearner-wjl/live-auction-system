@@ -323,3 +323,15 @@
 | human-reviewed decisions | 不回退用户已有文档清理和演示功能变更；只补审查发现的真实边界风险；上传仍定位为本地演示能力，生产需对象存储 / CDN / 内容安全策略 |
 | tests run | `git diff --check`、`pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/admin typecheck`、`pnpm --filter @live-auction/mobile typecheck`、`pnpm --filter @live-auction/server test`、`pnpm typecheck`、`pnpm test`、`pnpm test:e2e`、`pnpm lint`、`pnpm build` |
 | known issues | 真实浏览器三用户交替出价、流拍刷新和本地图片上传仍需重启服务后按手工清单复测；本地上传未实现鉴权外的配额、病毒扫描、对象存储或 CDN |
+
+## 2026-06-04
+
+| 字段 | 内容 |
+| --- | --- |
+| task | 修复生产 compose 本机实跑失败 |
+| prompt summary | 用户说明 DEV 手册已完成、无 bug，但生产 compose 拉不起来，要求继续处理 P0 收口问题 |
+| files changed | `.dockerignore`、`.env.example`、`docker-compose.prod.yml`、`packages/shared/src/index.ts`、`README.md`、`docs/manual-test.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | Docker build context 忽略规则修复、生产 compose MySQL/Redis 宿主机端口避让、shared 包 Node ESM 导出修复、生产 compose 实跑记录 |
+| human-reviewed decisions | 不要求用户停止 dev compose，改为让生产 compose 默认使用 `13307/16379` 暴露 MySQL/Redis；server 内部仍使用 Docker 网络里的 `mysql:3306` 和 `redis:6379`；shared 包采用显式 `.js` re-export，兼容 Node ESM 生产运行 |
+| tests run | `docker compose -f docker-compose.prod.yml config`、`docker compose -f docker-compose.prod.yml up -d --build`、`docker compose -f docker-compose.prod.yml ps`、`curl.exe -sS --max-time 10 http://127.0.0.1:3000/health`、`curl.exe -sS --max-time 10 -I http://127.0.0.1:8080/`、`curl.exe -sS --max-time 10 -I http://127.0.0.1:8081/`、`curl.exe -sS --max-time 10 http://127.0.0.1:3000/admin/auctions -H "X-Demo-User-Id: admin_1" -H "X-Demo-Role: admin"`、`pnpm --filter @live-auction/shared typecheck`、`pnpm --filter @live-auction/shared build`、`git diff --check`、`pnpm typecheck`、`pnpm test:e2e`、`pnpm lint`、`pnpm test` 单独重跑通过、`pnpm build` |
+| known issues | 本次验证是本机生产 compose 实跑，不等同于全新机器或公网生产部署；生产 compose 仍使用 demo seed、默认凭据和本地静态上传目录，真实部署前必须替换；一次并行运行 `pnpm test` / `typecheck` / `test:e2e` / `lint` 时本机资源不足导致 `pnpm test` OOM，单独重跑已通过 |

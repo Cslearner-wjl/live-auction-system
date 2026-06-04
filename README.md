@@ -99,8 +99,10 @@ docker compose -f docker-compose.prod.yml up -d --build
 - server: `http://localhost:3000`
 - admin: `http://localhost:8080`
 - mobile: `http://localhost:8081`
+- mysql host port: `13307`
+- redis host port: `16379`
 
-`docker-compose.prod.yml` 会在 server 启动前执行 Prisma migrate deploy 和 seed，适合本地一键演示。真实生产环境应拆分迁移步骤，替换 demo 身份、默认数据库密码和公网 CORS 配置。
+`docker-compose.prod.yml` 会在 server 启动前执行 Prisma migrate deploy 和 seed，适合本地一键演示。生产 compose 默认使用 `13307/16379` 暴露 MySQL/Redis，避免和 dev compose 的 `3307/6379` 冲突。真实生产环境应拆分迁移步骤，替换 demo 身份、默认数据库密码和公网 CORS 配置。
 
 ## 验证命令
 
