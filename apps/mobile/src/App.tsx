@@ -706,7 +706,12 @@ function AuctionMiniCard({
 }) {
   const { auction, snapshot } = room;
   return (
-    <button type="button" className="auction-mini-card" onClick={onOpen}>
+    <button
+      type="button"
+      className="auction-mini-card"
+      data-testid="auction-mini-card"
+      onClick={onOpen}
+    >
       <img src={auction.item.imageUrl} alt="" />
       <span className="mini-copy">
         <small>{getPriceLabel(snapshot.status, snapshot.bidCount)}</small>
@@ -756,7 +761,13 @@ function AuctionPanel({
   return (
     <div className="sheet-layer" role="presentation">
       <button type="button" className="sheet-scrim" onClick={onClose} aria-label="关闭竞拍面板" />
-      <section className="auction-panel" role="dialog" aria-modal="true" aria-label="竞拍详情">
+      <section
+        className="auction-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label="竞拍详情"
+        data-testid="auction-panel"
+      >
         <header className="panel-header">
           <div className="product-media">
             <img src={auction.item.imageUrl} alt="" />
@@ -780,7 +791,7 @@ function AuctionPanel({
         <section className="price-band" aria-label="竞拍价格">
           <div>
             <span>{getPriceLabel(snapshot.status, snapshot.bidCount)}</span>
-            <strong>{formatFen(snapshot.currentPriceFen)}</strong>
+            <strong data-testid="current-price">{formatFen(snapshot.currentPriceFen)}</strong>
           </div>
           <Countdown remainingMs={remainingMs} status={snapshot.status} />
         </section>
@@ -797,8 +808,12 @@ function AuctionPanel({
 
         <section className="my-state" aria-label="我的竞拍状态">
           <span>{isLeading ? "当前您已是最高价" : "我的出价"}</span>
-          <strong>{snapshot.myBidAmountFen === null ? "暂未出价" : formatFen(snapshot.myBidAmountFen)}</strong>
-          <em>{snapshot.myRank === null ? "暂无排名" : `第 ${snapshot.myRank} 名`}</em>
+          <strong data-testid="my-bid-amount">
+            {snapshot.myBidAmountFen === null ? "暂未出价" : formatFen(snapshot.myBidAmountFen)}
+          </strong>
+          <em data-testid="my-rank">
+            {snapshot.myRank === null ? "暂无排名" : `第 ${snapshot.myRank} 名`}
+          </em>
         </section>
 
         <BidStepper
@@ -813,6 +828,7 @@ function AuctionPanel({
         <button
           type="button"
           className="primary-bid-button"
+          data-testid="primary-bid-button"
           disabled={bidDisabled}
           onClick={onBid}
         >
@@ -852,7 +868,7 @@ function BidStepper({
       </button>
       <div>
         <span>本次出价</span>
-        <strong>{formatFen(selectedAmountFen)}</strong>
+        <strong data-testid="selected-bid-amount">{formatFen(selectedAmountFen)}</strong>
       </div>
       <button
         type="button"
@@ -953,7 +969,13 @@ function AuctionResultModal({
   return (
     <div className="result-layer" role="presentation">
       <button type="button" className="result-scrim" onClick={onClose} aria-label="关闭结果" />
-      <section className="result-modal" role="dialog" aria-modal="true" aria-label="竞拍结果">
+      <section
+        className="result-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="竞拍结果"
+        data-testid="auction-result-modal"
+      >
         <span className={`result-mark ${won ? "won" : ""}`}>
           {won ? "成交" : statusText(snapshot.status)}
         </span>
@@ -969,12 +991,17 @@ function AuctionResultModal({
           <Metric label={sold ? "落槌价" : "最终价格"} value={formatFen(snapshot.currentPriceFen)} />
           <Metric label="出价次数" value={`${snapshot.bidCount} 次`} />
         </div>
-        {orderId ? <code className="order-code">订单 {orderId}</code> : null}
+        {orderId ? (
+          <code className="order-code" data-testid="result-order-code">
+            订单 {orderId}
+          </code>
+        ) : null}
         <div className="result-actions">
           {won ? (
             <button
               type="button"
               className="primary-bid-button"
+              data-testid="mock-pay-button"
               disabled={paymentState !== "pending"}
               onClick={onMockPay}
             >
@@ -991,7 +1018,7 @@ function AuctionResultModal({
 }
 
 function BidToast({ message }: { message: string | null }) {
-  return message ? <div className="bid-toast">{message}</div> : null;
+  return message ? <div className="bid-toast" data-testid="bid-toast">{message}</div> : null;
 }
 
 function patchSnapshotFromEvent(

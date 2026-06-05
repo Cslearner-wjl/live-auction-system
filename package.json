@@ -12,13 +12,17 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "pnpm -r --if-present lint",
     "test": "pnpm -r --if-present test",
-    "test:e2e": "pnpm -r --if-present test:e2e",
+    "test:e2e": "pnpm test:e2e:server && pnpm test:e2e:ui",
+    "test:e2e:server": "pnpm --filter @live-auction/server test:e2e",
+    "test:e2e:ui": "tsx tests/e2e/preflight.ts && playwright test",
     "perf:day12": "pnpm --filter @live-auction/server perf:day12",
     "perf:socket": "pnpm --filter @live-auction/server perf:socket",
     "perf:day12:k6": "pnpm --filter @live-auction/server perf:day12:k6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/node": "^24.0.0",
+    "tsx": "^4.20.3",
     "typescript": "^5.8.3"
   }
 }

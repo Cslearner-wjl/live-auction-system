@@ -376,7 +376,14 @@ export function App() {
         </div>
       </section>
 
-      {message ? <p className={messageTone === "error" ? "notice error" : "notice"}>{message}</p> : null}
+      {message ? (
+        <p
+          className={messageTone === "error" ? "notice error" : "notice"}
+          data-testid="admin-notice"
+        >
+          {message}
+        </p>
+      ) : null}
 
       <nav className="tabs" aria-label="admin views">
         <button
@@ -441,7 +448,11 @@ export function App() {
               </thead>
               <tbody>
                 {auctions?.items.map((auction) => (
-                  <tr key={auction.id}>
+                  <tr
+                    key={auction.id}
+                    data-testid="admin-auction-row"
+                    data-auction-id={auction.id}
+                  >
                     <td>
                       <ProductCell
                         imageUrl={auction.itemImageUrl}
@@ -472,6 +483,7 @@ export function App() {
                       <div className="row-actions">
                         <button
                           type="button"
+                          data-testid={`start-auction-${auction.id}`}
                           onClick={() => void startAuction(auction.id)}
                           disabled={
                             auction.status !== AuctionStatus.Scheduled ||
@@ -483,6 +495,7 @@ export function App() {
                         <button
                           type="button"
                           className="danger"
+                          data-testid={`cancel-auction-${auction.id}`}
                           onClick={() => void cancelAuction(auction.id)}
                           disabled={
                             ![AuctionStatus.Scheduled, AuctionStatus.Running].includes(
@@ -653,7 +666,12 @@ export function App() {
             </div>
 
             <div className="form-actions">
-              <button type="submit" className="primary" disabled={createSubmitting}>
+              <button
+                type="submit"
+                className="primary"
+                data-testid="create-auction-submit"
+                disabled={createSubmitting}
+              >
                 {createSubmitting ? "创建中" : "创建竞拍"}
               </button>
               <button
@@ -691,7 +709,7 @@ export function App() {
               </thead>
               <tbody>
                 {orders?.items.map((order) => (
-                  <tr key={order.id}>
+                  <tr key={order.id} data-testid="admin-order-row">
                     <td>
                       <ProductCell
                         imageUrl={order.itemImageUrl ?? ""}

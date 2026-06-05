@@ -335,3 +335,15 @@
 | human-reviewed decisions | 不要求用户停止 dev compose，改为让生产 compose 默认使用 `13307/16379` 暴露 MySQL/Redis；server 内部仍使用 Docker 网络里的 `mysql:3306` 和 `redis:6379`；shared 包采用显式 `.js` re-export，兼容 Node ESM 生产运行 |
 | tests run | `docker compose -f docker-compose.prod.yml config`、`docker compose -f docker-compose.prod.yml up -d --build`、`docker compose -f docker-compose.prod.yml ps`、`curl.exe -sS --max-time 10 http://127.0.0.1:3000/health`、`curl.exe -sS --max-time 10 -I http://127.0.0.1:8080/`、`curl.exe -sS --max-time 10 -I http://127.0.0.1:8081/`、`curl.exe -sS --max-time 10 http://127.0.0.1:3000/admin/auctions -H "X-Demo-User-Id: admin_1" -H "X-Demo-Role: admin"`、`pnpm --filter @live-auction/shared typecheck`、`pnpm --filter @live-auction/shared build`、`git diff --check`、`pnpm typecheck`、`pnpm test:e2e`、`pnpm lint`、`pnpm test` 单独重跑通过、`pnpm build` |
 | known issues | 本次验证是本机生产 compose 实跑，不等同于全新机器或公网生产部署；生产 compose 仍使用 demo seed、默认凭据和本地静态上传目录，真实部署前必须替换；一次并行运行 `pnpm test` / `typecheck` / `test:e2e` / `lint` 时本机资源不足导致 `pnpm test` OOM，单独重跑已通过 |
+
+## 2026-06-04
+
+| 字段 | 内容 |
+| --- | --- |
+| task | 完成 P2 Playwright 浏览器全链路用例 |
+| prompt summary | 用户要求补齐 Playwright 配置和浏览器全链路用例，覆盖后台创建商品和竞拍、启动、两个移动端用户交替出价、被超越提示、刷新 / 重连 snapshot、封顶成交、模拟支付、后台订单可见 |
+| files changed | `.gitignore`、`package.json`、`pnpm-lock.yaml`、`playwright.config.ts`、`tests/e2e/preflight.ts`、`tests/e2e/live-auction-flow.spec.ts`、`apps/admin/src/App.tsx`、`apps/mobile/src/App.tsx`、`docs/manual-test.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | Playwright 配置、预检脚本、浏览器全链路 spec、前端测试定位点、手工测试清单和 AI 日志更新 |
+| human-reviewed decisions | E2E 使用专用端口 `3100/5273/5274`，避免复用本机已有 `3000/5173/5174` 服务造成 CORS 和数据状态干扰；测试只增加 `data-testid`，不改变公开 API / WebSocket 契约；刷新恢复放在 user_2 超越 user_1 后验证 snapshot 的当前价、我的出价和排名 |
+| tests run | `pnpm install`、`pnpm typecheck`、`pnpm exec playwright install chromium`、`pnpm test:e2e:ui`、`pnpm test:e2e`、`pnpm test`、`pnpm lint`、`pnpm build`、`git diff --check`、密钥关键词扫描、确认 `docs/learning/` 和 Playwright 生成物未进入 Git |
+| known issues | Playwright UI E2E 依赖本机 Docker/MySQL/Redis 和浏览器缓存；首次运行需要执行或由环境预装 `pnpm exec playwright install chromium`；当前浏览器用例覆盖双移动端交替出价，不替代后续真实断网、弱网和更多并发浏览器场景 |

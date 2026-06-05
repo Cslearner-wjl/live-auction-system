@@ -13,6 +13,7 @@
 | 用户订单 | `apps/server/src/order/user-orders.service.test.ts` | 竞拍历史、订单详情、买家权限、模拟支付 |
 | 服务级闭环 | `apps/server/src/day10-core-loop.e2e.test.ts` | 创建商品、创建竞拍、启动、封顶成交、后台订单可见 |
 | 服务级异常场景 | `apps/server/src/day11-auction-scenarios.e2e.test.ts` | 流拍、一人成交、连续出价、延时、取消、幂等、snapshot 恢复 |
+| 浏览器全链路 | `tests/e2e/live-auction-flow.spec.ts` | Playwright 覆盖后台创建商品和竞拍、启动竞拍、两个移动端用户交替出价、被超越提示、刷新 / 重连 snapshot、封顶成交、模拟支付、后台订单可见 |
 | 真实 HTTP 压测 | `pnpm perf:day12` | 真实 server + MySQL + Redis，30/100 并发出价一致性通过 |
 
 ## 2. 最终演示手测清单
@@ -22,17 +23,17 @@
 | 本地依赖启动 | Docker 可用 | `docker compose up -d mysql redis` | MySQL、Redis healthy | 待最终执行 |
 | 数据库准备 | 依赖已启动 | `pnpm --filter @live-auction/server prisma:migrate`、`pnpm --filter @live-auction/server prisma:seed` | schema up to date，demo 数据重置 | 已完成 |
 | 后端健康检查 | server 已启动 | 打开 `http://localhost:3000/health` | `status=ok`，DB/Redis 均 ok | 待最终执行 |
-| 后台创建商品和竞拍 | admin 已启动 | 打开 `/admin/items/new`，填写商品和规则后提交 | 生成 `SCHEDULED` 竞拍，列表可见 | 2026-06-03：基本流程已手测跑通；本轮新增本地图片上传已复测通过 |
+| 后台创建商品和竞拍 | admin 已启动 | 打开 `/admin/items/new`，填写商品和规则后提交 | 生成 `SCHEDULED` 竞拍，列表可见 | 2026-06-03：基本流程已手测跑通；2026-06-04：Playwright 浏览器 E2E 已覆盖 |
 | 0 元起拍 | 创建页起拍价填 `0` | 提交后启动竞拍 | `currentPriceFen=0`，可按固定加价出价 | 单元测试已覆盖；真实页面待最终手测 |
-| 后台启动竞拍 | 存在 `SCHEDULED` 竞拍 | 点击启动 | 状态变为 `RUNNING`，移动端可见 | 服务级 e2e 已覆盖；真实页面待最终手测 |
-| 三用户实时出价 | 同一竞拍 `RUNNING` | 打开 user_1、user_2、user_3 三个移动端窗口交替出价 | 当前价单调递增，领先 / 被超越提示正确，第三用户可参与 | 2026-06-03：手测发现 user_3 触发一致性补偿；已补 demo bidder 自动创建和 seed user_3，已复测通过 |
+| 后台启动竞拍 | 存在 `SCHEDULED` 竞拍 | 点击启动 | 状态变为 `RUNNING`，移动端可见 | 服务级 e2e 和 Playwright 浏览器 E2E 已覆盖 |
+| 三用户实时出价 | 同一竞拍 `RUNNING` | 打开 user_1、user_2、user_3 三个移动端窗口交替出价 | 当前价单调递增，领先 / 被超越提示正确，第三用户可参与 | 2026-06-03：user_3 问题已复测通过；2026-06-04：Playwright 已覆盖 user_1 / user_2 / user_1 交替出价和被超越提示 |
 | 防狙击延时 | 竞拍接近结束且设置延时 | 最后窗口内有效出价 | `endTime` 延后，页面收到延时提示 | 服务级 e2e 已覆盖；真实页面待最终手测 |
-| 封顶价立即成交 | 竞拍设置封顶价 | 用户出到封顶价 | 状态 `ENDED_SOLD`，仅生成一个订单 | 服务级 e2e 和 HTTP 压测一致性已覆盖；真实页面待最终手测 |
+| 封顶价立即成交 | 竞拍设置封顶价 | 用户出到封顶价 | 状态 `ENDED_SOLD`，仅生成一个订单 | 服务级 e2e、HTTP 压测一致性和 Playwright 浏览器 E2E 已覆盖 |
 | 无人流拍 | 启动短时竞拍且无人出价 | 等待到期并刷新移动端 | 状态 `ENDED_UNSOLD`，无订单，刷新后仍停留最新流拍场次 | 2026-06-03：手测发现刷新回退到上一场成交；已修复移动端默认场次选择，已复测通过 |
 | 运行中取消 | 竞拍 `RUNNING` | 后台点击取消并填写原因 | 状态 `CANCELLED`，移动端禁用出价 | 服务级 e2e 已覆盖；真实页面待最终手测 |
-| 断线 / 刷新恢复 | 已有出价 | 刷新移动端或断开后重连 | snapshot 恢复当前价、排名、倒计时和订单结果 | 服务级 e2e 覆盖 snapshot；真实浏览器待最终手测 |
-| 结果弹窗和模拟支付 | 用户中拍 | 在移动端结果弹窗点击模拟支付 | 订单状态变为 `PAID`，后台订单可见 | 单窗口烟测曾通过；双窗口最终手测待补 |
-| 后台订单列表 | 已成交或已支付 | 打开 `/admin/orders` | 订单金额、买家、状态正确 | 服务级 e2e 已覆盖；真实页面待最终手测 |
+| 断线 / 刷新恢复 | 已有出价 | 刷新移动端或断开后重连 | snapshot 恢复当前价、排名、倒计时和订单结果 | 服务级 e2e 和 Playwright 浏览器刷新恢复已覆盖 |
+| 结果弹窗和模拟支付 | 用户中拍 | 在移动端结果弹窗点击模拟支付 | 订单状态变为 `PAID`，后台订单可见 | Playwright 双窗口浏览器 E2E 已覆盖 |
+| 后台订单列表 | 已成交或已支付 | 打开 `/admin/orders` | 订单金额、买家、状态正确 | 服务级 e2e 和 Playwright 浏览器 E2E 已覆盖 |
 | 生产 compose | Docker 可用 | `docker compose -f docker-compose.prod.yml up -d --build` | server/admin/mobile 可访问 | 2026-06-04：本机实跑通过；server/admin/mobile/mysql/redis 均 healthy，`/health`、后台首页、移动端首页和后台竞拍列表验证通过 |
 
 ## 2.1 2026-06-03 手测问题复测结果
@@ -55,12 +56,16 @@
 ## 4. 收尾校验命令
 
 ```powershell
+pnpm exec playwright install chromium
+pnpm test:e2e:ui
 pnpm typecheck
 pnpm test
 pnpm test:e2e
 pnpm lint
 pnpm build
 ```
+
+`pnpm test:e2e:ui` 会使用专用端口启动一组隔离服务：server `3100`、admin `5273`、mobile `5274`，避免复用本机已有 `3000/5173/5174` 服务导致 CORS 或数据状态干扰。首次运行 Playwright 前需要安装 Chromium；已安装后命令会直接复用本机浏览器缓存。
 
 如 Docker 环境已启动，再补：
 
