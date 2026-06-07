@@ -347,3 +347,63 @@
 | human-reviewed decisions | E2E 使用专用端口 `3100/5273/5274`，避免复用本机已有 `3000/5173/5174` 服务造成 CORS 和数据状态干扰；测试只增加 `data-testid`，不改变公开 API / WebSocket 契约；刷新恢复放在 user_2 超越 user_1 后验证 snapshot 的当前价、我的出价和排名 |
 | tests run | `pnpm install`、`pnpm typecheck`、`pnpm exec playwright install chromium`、`pnpm test:e2e:ui`、`pnpm test:e2e`、`pnpm test`、`pnpm lint`、`pnpm build`、`git diff --check`、密钥关键词扫描、确认 `docs/learning/` 和 Playwright 生成物未进入 Git |
 | known issues | Playwright UI E2E 依赖本机 Docker/MySQL/Redis 和浏览器缓存；首次运行需要执行或由环境预装 `pnpm exec playwright install chromium`；当前浏览器用例覆盖双移动端交替出价，不替代后续真实断网、弱网和更多并发浏览器场景 |
+
+## 2026-06-05
+
+| 字段 | 内容 |
+| --- | --- |
+| task | P3 前端界面 polish：根据 `picture/` 参考图优化移动端竞拍体验和后台列表密度 |
+| prompt summary | 用户要求按已确认的 P3 plan 实现参考级还原，不改 API / WebSocket / 状态机，保留现有 Playwright 定位点 |
+| files changed | `apps/mobile/src/App.tsx`、`apps/mobile/src/styles.css`、`apps/admin/src/App.tsx`、`apps/admin/src/styles.css`、`docs/manual-test.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | 移动端直播层级、竞拍小卡、浅色半屏竞拍面板、价格 / 我的出价双列、状态 toast、结果弹窗视觉优化；后台竞拍列表行号、价格单元、剩余时间 chip、列表密度和创建 / 订单页统一样式 |
+| human-reviewed decisions | 不引入 Ant Design、动画库或新状态库；只做前端展示层 polish；不改变出价按钮业务禁用条件、REST API、WebSocket 事件或 shared 契约；保留 P2 Playwright 所需 `data-testid` |
+| tests run | `pnpm --filter @live-auction/mobile typecheck`、`pnpm --filter @live-auction/admin typecheck`、`pnpm --filter @live-auction/mobile build`、`pnpm --filter @live-auction/admin build`、`pnpm typecheck`、`pnpm test`、`pnpm lint`、`pnpm build`、`pnpm test:e2e:ui`、`pnpm test:e2e`、Playwright 视觉探针检查移动端 390x844 / 360x740 和后台 1440x900 横向溢出均为 0 |
+| known issues | P3 只优化演示体验，不新增认证、支付或直播推流能力；视觉探针截图位于本地 ignored 目录 `tmp/p3-visual-check/`，不作为提交资产 |
+
+## 2026-06-07
+
+| 字段 | 内容 |
+| --- | --- |
+| task | 排查并修复界面 `Failed to fetch` |
+| prompt summary | 用户反馈界面出现 `Failed to fetch`，要求排查原因 |
+| files changed | `apps/server/src/common/cors-origins.ts`、`apps/server/src/common/cors-origins.test.ts`、`apps/server/src/main.ts`、`apps/server/src/realtime/auction-realtime.gateway.ts`、`.env.example`、`README.md`、`docs/api.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | HTTP / Socket.IO 共享 CORS origin helper、默认允许 dev 前端 `localhost` / `127.0.0.1` 来源、逗号分隔环境来源解析、CORS 单测和文档说明 |
+| human-reviewed decisions | 根因是 dev 前端 `5173/5174` 请求正在运行的 prod server 容器 `3000`，旧容器只允许 prod 前端 `8080/8081`，浏览器被 CORS 拦截；保留生产环境变量扩展能力，不改 REST / WebSocket 契约，不碰竞拍状态机 |
+| tests run | `pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/server test`、`docker compose -f docker-compose.prod.yml up -d --build --no-deps server`、`curl.exe` 验证 `Access-Control-Allow-Origin`、Playwright 临时脚本验证管理后台和移动端不再显示 `Failed to fetch`、`pnpm typecheck`、`pnpm test`、`pnpm lint`、`pnpm test:e2e`、`pnpm build`、`git diff --check`、`git check-ignore -v docs\\learning\\engineering-experience.md` |
+| known issues | 重建 prod server 会重新执行 demo seed，固定 `auction_1` 会回到未开始；后台仍有两个非阻塞图片请求失败，分别来自无效 `example.com` 演示图和 prod 容器内不存在的历史上传文件 |
+
+## 2026-06-07
+
+| 字段 | 内容 |
+| --- | --- |
+| task | 修复竞拍倒计时归零后一直“确认结果中” |
+| prompt summary | 用户反馈移动端竞拍面板倒计时为 `0:00`，按钮一直显示“确认结果中”，无法进入付款 |
+| files changed | `apps/server/src/auction/auction-scheduler.service.ts`、`apps/server/src/auction/auction-scheduler.service.test.ts`、`docker-compose.prod.yml`、`.env.example`、`README.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | 结束 timer 结算宽限、timer 早触发后的重试调度、scheduler 回归测试、生产 compose 可跳过 demo seed 的启动开关 |
+| human-reviewed decisions | 不放松状态机的 `now >= endTime` 保护，只在 scheduler 层避免毫秒级早触发后丢失结算任务；重建 prod server 时用 `RUN_DEMO_SEED=false` 保留现场数据，由启动恢复逻辑结算已过期竞拍；确认第 2 名用户不能付款，只有最高出价人 `user_1` 能看到支付入口 |
+| tests run | `pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/server test`、`docker compose -f docker-compose.prod.yml config`、`RUN_DEMO_SEED=false docker compose -f docker-compose.prod.yml up -d --build --no-deps server`、`curl.exe` 验证 `auction_1` 状态为 `ENDED_SOLD` 且订单已生成、Playwright 临时脚本验证 `user_1` 出现“模拟支付”且 `user_2` 无支付入口、`pnpm typecheck`、`pnpm test`、`pnpm lint`、`pnpm test:e2e`、`pnpm build` |
+| known issues | 当前付款入口只对赢家显示；已打开的旧页面如没有收到 WebSocket 事件，刷新后会按最新 snapshot 进入结果视图；生产 compose 默认仍会 seed，排查现场状态时需显式设置 `RUN_DEMO_SEED=false` |
+
+## 2026-06-07
+
+| 字段 | 内容 |
+| --- | --- |
+| task | 生成并接入移动端直播卖货背景图 |
+| prompt summary | 用户要求自行生成一张直播卖货图片，并作为移动端直播间背景 |
+| files changed | `apps/mobile/src/assets/live-commerce-background.webp`、`apps/mobile/src/mobile-auction-service.ts`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | 使用内置 imagegen 生成竖版直播卖货场景图，并用 Pillow 压缩为 94KB WebP 项目资源 |
+| human-reviewed decisions | 背景使用本地 Vite asset，不再依赖远程 Unsplash；保留现有遮罩和直播间 UI 结构；选择无可读文字、无 logo、无人物正脸的茶具直播陈列场景，避免干扰前景信息 |
+| tests run | `pnpm --filter @live-auction/mobile typecheck`、`pnpm --filter @live-auction/mobile build`、Playwright 临时脚本验证 `.video-area` 背景 URL 使用 `live-commerce-background.webp`、竞拍小卡存在且无 `Failed to fetch` |
+| known issues | 图片是 AI 生成的演示背景，不代表真实直播推流画面；当前截图处于结果弹窗打开状态，背景被遮罩和弹窗弱化，这是现有 UI 的正常层级 |
+
+## 2026-06-07
+
+| 字段 | 内容 |
+| --- | --- |
+| task | 调整移动端竞拍小卡片尺寸，避免遮挡直播评论 |
+| prompt summary | 用户反馈右下角竞拍结果小卡片遮住评论，要求调整大小 |
+| files changed | `apps/mobile/src/App.tsx`、`apps/mobile/src/styles.css`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | 小卡片三行信息结构、价格标签与金额合并展示、已结束状态下不再渲染紧凑倒计时状态块、评论区底部安全距离和小卡片尺寸压缩 |
+| human-reviewed decisions | 只修改移动端展示层，不改 REST API、WebSocket 事件、竞拍状态机或支付逻辑；保留进行中竞拍的小卡片倒计时，已成交 / 已取消等终态只保留状态角标和查看结果入口 |
+| tests run | `pnpm --filter @live-auction/mobile typecheck`、`pnpm --filter @live-auction/mobile build`、Playwright 临时脚本在 390x844 视口验证竞拍小卡从 366x87 缩小到 300x68，三条评论均未与小卡相交且页面无 `Failed to fetch` |
+| known issues | 长商品名在小卡片中仍会单行省略，完整信息需打开半屏面板查看；本次未新增业务逻辑测试，因为没有修改竞拍规则或状态流转 |

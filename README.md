@@ -140,10 +140,11 @@ $env:SOCKET_CONNECTIONS='1000'; pnpm perf:socket; Remove-Item Env:SOCKET_CONNECT
 | --- | --- |
 | `DATABASE_URL` | Prisma MySQL 连接 |
 | `REDIS_URL` | Redis 连接 |
-| `ADMIN_WEB_URL` / `MOBILE_WEB_URL` | 本地 CORS 来源 |
+| `ADMIN_WEB_URL` / `MOBILE_WEB_URL` | CORS 来源，支持逗号分隔多个来源；服务端默认额外允许 `localhost` / `127.0.0.1` 的 `5173` 和 `5174` |
 | `BID_LOCK_*` | Redis 出价锁配置 |
 | `OUTBOX_*` | outbox claim / retry 配置 |
 | `AUCTION_CONSISTENCY_*` | Redis/DB 对账审计配置 |
+| `RUN_DEMO_SEED` | 生产 compose 演示是否在 server 启动时执行 demo seed，默认 `true`；排查线上状态时可临时设为 `false` 避免重置 `auction_1` |
 
 ## 本地图片上传
 

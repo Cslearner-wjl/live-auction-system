@@ -7,6 +7,7 @@
 ### 1.1 基础信息
 
 - Base URL：`http://localhost:3000`
+- 本地 CORS：服务端默认允许 `http://localhost:5173`、`http://127.0.0.1:5173`、`http://localhost:5174`、`http://127.0.0.1:5174`；`ADMIN_WEB_URL` / `MOBILE_WEB_URL` 可用逗号分隔追加来源，例如本机 LAN 调试地址。
 - Content-Type：`application/json; charset=utf-8`
 - 金额：全部使用整数分，字段名必须以 `Fen` 结尾。
 - 时间：全部使用 ISO 8601 字符串，例如 `2026-06-01T10:00:00.000Z`。

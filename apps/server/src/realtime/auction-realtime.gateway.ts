@@ -20,6 +20,7 @@ import {
 } from "@live-auction/shared";
 import { BidService } from "../bid/bid.service";
 import { type DemoUserContext } from "../common/demo-auth.guard";
+import { createCorsOriginDelegate } from "../common/cors-origins";
 import { AuctionSnapshotService } from "./auction-snapshot.service";
 
 interface JoinRoomPayload {
@@ -47,10 +48,7 @@ interface SocketAck {
 
 @WebSocketGateway({
   cors: {
-    origin: [
-      process.env.ADMIN_WEB_URL ?? "http://localhost:5173",
-      process.env.MOBILE_WEB_URL ?? "http://localhost:5174"
-    ],
+    origin: createCorsOriginDelegate(),
     credentials: true
   }
 })

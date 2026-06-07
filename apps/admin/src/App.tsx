@@ -416,21 +416,26 @@ export function App() {
               <h2>竞拍列表</h2>
               <p>查看状态、剩余时间、当前价和可执行操作。</p>
             </div>
-            <label className="field-inline">
-              <span>状态</span>
-              <select
-                value={auctionStatus}
-                onChange={(event) =>
-                  setAuctionStatus(event.target.value as AuctionStatus | "ALL")
-                }
-              >
-                {auctionStatusOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="toolbar-actions">
+              <label className="field-inline">
+                <span>状态</span>
+                <select
+                  value={auctionStatus}
+                  onChange={(event) =>
+                    setAuctionStatus(event.target.value as AuctionStatus | "ALL")
+                  }
+                >
+                  {auctionStatusOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button type="button" className="primary" onClick={() => switchView("create")}>
+                添加商品
+              </button>
+            </div>
           </div>
 
           <div className="table-wrap">
@@ -447,7 +452,7 @@ export function App() {
                 </tr>
               </thead>
               <tbody>
-                {auctions?.items.map((auction) => (
+                {auctions?.items.map((auction, index) => (
                   <tr
                     key={auction.id}
                     data-testid="admin-auction-row"
@@ -455,6 +460,7 @@ export function App() {
                   >
                     <td>
                       <ProductCell
+                        index={index + 1}
                         imageUrl={auction.itemImageUrl}
                         name={auction.itemName}
                         tags={auction.itemSellingPoints ?? []}
@@ -468,17 +474,26 @@ export function App() {
                       </div>
                     </td>
                     <td>
-                      <strong>{formatFen(auction.currentPriceFen)}</strong>
-                      <small>{auction.status === AuctionStatus.EndedSold ? "成交金额" : "当前出价"}</small>
+                      <PriceCell
+                        value={auction.currentPriceFen}
+                        label={auction.status === AuctionStatus.EndedSold ? "成交金额" : "当前出价"}
+                        active={auction.status === AuctionStatus.Running}
+                      />
                     </td>
                     <td>
-                      <strong>{auction.bidCount}</strong>
-                      <small>{auction.highestBidderId ? `领先 ${auction.highestBidderId}` : "暂无出价"}</small>
+                      <div className="bid-count-cell">
+                        <strong>{auction.bidCount}</strong>
+                        <small>
+                          {auction.highestBidderId ? `领先 ${auction.highestBidderId}` : "暂无出价"}
+                        </small>
+                      </div>
                     </td>
                     <td>
                       <StatusBadge status={auction.status} />
                     </td>
-                    <td>{formatRemaining(auction, now)}</td>
+                    <td>
+                      <span className="remaining-chip">{formatRemaining(auction, now)}</span>
+                    </td>
                     <td>
                       <div className="row-actions">
                         <button
@@ -755,16 +770,19 @@ export function App() {
 }
 
 function ProductCell({
+  index,
   imageUrl,
   name,
   tags
 }: {
+  index?: number;
   imageUrl: string;
   name: string;
   tags: string[];
 }) {
   return (
-    <div className="product-cell">
+    <div className={index ? "product-cell with-index" : "product-cell"}>
+      {index ? <span className="product-index">{index.toString().padStart(2, "0")}</span> : null}
       <img src={imageUrl || "https://placehold.co/96x96?text=Item"} alt="" />
       <div>
         <strong>{name}</strong>
@@ -776,6 +794,23 @@ function ProductCell({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function PriceCell({
+  value,
+  label,
+  active
+}: {
+  value: number;
+  label: string;
+  active: boolean;
+}) {
+  return (
+    <div className={active ? "price-cell active" : "price-cell"}>
+      <strong>{formatFen(value)}</strong>
+      <small>{label}</small>
     </div>
   );
 }

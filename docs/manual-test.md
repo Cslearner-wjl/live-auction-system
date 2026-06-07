@@ -33,6 +33,7 @@
 | 运行中取消 | 竞拍 `RUNNING` | 后台点击取消并填写原因 | 状态 `CANCELLED`，移动端禁用出价 | 服务级 e2e 已覆盖；真实页面待最终手测 |
 | 断线 / 刷新恢复 | 已有出价 | 刷新移动端或断开后重连 | snapshot 恢复当前价、排名、倒计时和订单结果 | 服务级 e2e 和 Playwright 浏览器刷新恢复已覆盖 |
 | 结果弹窗和模拟支付 | 用户中拍 | 在移动端结果弹窗点击模拟支付 | 订单状态变为 `PAID`，后台订单可见 | Playwright 双窗口浏览器 E2E 已覆盖 |
+| P3 界面 polish | admin/mobile 已启动 | 移动端 390x844、360px 打开直播间和竞拍面板；后台宽屏打开竞拍列表 / 创建页 / 订单页 | 移动端半屏面板、价格、出价步进、toast 和结果弹窗无溢出遮挡；后台列表可扫描，按钮状态清晰 | 2026-06-05：Playwright 视觉探针已截取移动端 390/360 和后台宽屏，横向溢出检测均为 0 |
 | 后台订单列表 | 已成交或已支付 | 打开 `/admin/orders` | 订单金额、买家、状态正确 | 服务级 e2e 和 Playwright 浏览器 E2E 已覆盖 |
 | 生产 compose | Docker 可用 | `docker compose -f docker-compose.prod.yml up -d --build` | server/admin/mobile 可访问 | 2026-06-04：本机实跑通过；server/admin/mobile/mysql/redis 均 healthy，`/health`、后台首页、移动端首页和后台竞拍列表验证通过 |
 

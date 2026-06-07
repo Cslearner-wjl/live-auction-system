@@ -49,6 +49,7 @@ services:
       REDIS_URL: redis://redis:6379
       ADMIN_WEB_URL: ${PROD_ADMIN_WEB_URL:-http://localhost:8080}
       MOBILE_WEB_URL: ${PROD_MOBILE_WEB_URL:-http://localhost:8081}
+      RUN_DEMO_SEED: ${RUN_DEMO_SEED:-true}
       AUCTION_CONSISTENCY_WORKER_ENABLED: ${AUCTION_CONSISTENCY_WORKER_ENABLED:-true}
     ports:
       - "${SERVER_PORT:-3000}:3000"
@@ -59,7 +60,7 @@ services:
         condition: service_healthy
     command: >
       sh -c "pnpm --filter @live-auction/server exec prisma migrate deploy --schema prisma/schema.prisma
-      && pnpm --filter @live-auction/server exec prisma db seed --schema prisma/schema.prisma
+      && if [ \"$${RUN_DEMO_SEED}\" = \"true\" ]; then pnpm --filter @live-auction/server exec prisma db seed --schema prisma/schema.prisma; else echo 'Skipping demo seed'; fi
       && node apps/server/dist/main.js"
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]

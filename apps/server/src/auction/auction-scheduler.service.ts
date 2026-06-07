@@ -3,6 +3,7 @@ import {
   AuctionStatus as PrismaAuctionStatus,
   type AuctionSession
 } from "@prisma/client";
+import { ApiException } from "../common/api-error";
 import { AuctionStateMachineService } from "./auction-state-machine.service";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -11,6 +12,9 @@ type AuctionEndTimer = ReturnType<typeof setTimeout> & {
 };
 
 type SchedulableAuction = Pick<AuctionSession, "id" | "status" | "endTime">;
+
+const endTimerSettleGraceMs = 50;
+const endTimerRetryDelayMs = 100;
 
 @Injectable()
 export class AuctionSchedulerService implements OnModuleInit, OnModuleDestroy {
@@ -76,12 +80,7 @@ export class AuctionSchedulerService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const timer = setTimeout(() => {
-      void this.finishFromTimer(auction.id);
-    }, delayMs) as AuctionEndTimer;
-
-    timer.unref?.();
-    this.endTimers.set(auction.id, timer);
+    this.setEndTimer(auction.id, delayMs + endTimerSettleGraceMs);
   }
 
   clearEndTimer(auctionId: string): void {
@@ -101,6 +100,11 @@ export class AuctionSchedulerService implements OnModuleInit, OnModuleDestroy {
     try {
       await this.stateMachine.finishAuction(auctionId);
     } catch (error: unknown) {
+      if (isEndTimeNotReachedError(error)) {
+        await this.rescheduleAfterEndTimeNotReached(auctionId);
+        return;
+      }
+
       this.logger.warn(
         `Auction ${auctionId} finish timer skipped: ${
           error instanceof Error ? error.message : String(error)
@@ -108,4 +112,53 @@ export class AuctionSchedulerService implements OnModuleInit, OnModuleDestroy {
       );
     }
   }
+
+  private async rescheduleAfterEndTimeNotReached(auctionId: string): Promise<void> {
+    const auction = await this.prisma.auctionSession.findUnique({
+      where: { id: auctionId },
+      select: {
+        id: true,
+        status: true,
+        endTime: true
+      }
+    });
+
+    if (!auction || auction.status !== PrismaAuctionStatus.RUNNING || !auction.endTime) {
+      return;
+    }
+
+    const delayMs = Math.max(
+      auction.endTime.getTime() - Date.now() + endTimerSettleGraceMs,
+      endTimerRetryDelayMs
+    );
+
+    this.logger.warn(
+      `Auction ${auctionId} finish timer fired before endTime; retrying in ${delayMs}ms`
+    );
+    this.setEndTimer(auctionId, delayMs);
+  }
+
+  private setEndTimer(auctionId: string, delayMs: number): void {
+    const timer = setTimeout(() => {
+      void this.finishFromTimer(auctionId);
+    }, delayMs) as AuctionEndTimer;
+
+    timer.unref?.();
+    this.endTimers.set(auctionId, timer);
+  }
+}
+
+function isEndTimeNotReachedError(error: unknown): boolean {
+  if (error instanceof ApiException) {
+    const response = error.getResponse();
+
+    return (
+      typeof response === "object" &&
+      response !== null &&
+      "message" in response &&
+      response.message === "竞拍尚未到结束时间"
+    );
+  }
+
+  return error instanceof Error && error.message.includes("竞拍尚未到结束时间");
 }

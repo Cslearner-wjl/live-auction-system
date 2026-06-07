@@ -648,12 +648,14 @@ function LiveHeader({
 }) {
   return (
     <header className="live-header">
-      <div className="host-avatar" aria-hidden="true">
-        澄
-      </div>
-      <div className="host-copy">
-        <strong>{room.hostName}</strong>
-        <span>{room.hostBadge}</span>
+      <div className="host-cluster">
+        <div className="host-avatar" aria-hidden="true">
+          澄
+        </div>
+        <div className="host-copy">
+          <strong>{room.hostName}</strong>
+          <span>{room.hostBadge}</span>
+        </div>
       </div>
       <button type="button" className="follow-button">
         关注
@@ -661,6 +663,13 @@ function LiveHeader({
       <span className="viewer-count" title={realtimeState}>
         {room.viewerCount} 在线
       </span>
+      <button type="button" className="close-live-button" aria-label="关闭直播间">
+        ×
+      </button>
+      <div className="live-topic-row" aria-label="直播主题">
+        <span>热拍</span>
+        <strong>{room.streamTitle}</strong>
+      </div>
     </header>
   );
 }
@@ -685,10 +694,13 @@ function LiveActions({ likeCount }: { likeCount: number }) {
         说点什么...
       </button>
       <button type="button" className="round-action" aria-label="购物车">
-        袋
+        购
       </button>
       <button type="button" className="round-action" aria-label="点赞">
         ♥
+      </button>
+      <button type="button" className="round-action" aria-label="礼物">
+        礼
       </button>
       <span className="like-count">{formatCompact(likeCount)}</span>
     </footer>
@@ -705,6 +717,9 @@ function AuctionMiniCard({
   onOpen: () => void;
 }) {
   const { auction, snapshot } = room;
+  const actionText = snapshot.status === AuctionStatus.Running ? "立即出价" : "查看结果";
+  const showCountdown = snapshot.status === AuctionStatus.Running;
+
   return (
     <button
       type="button"
@@ -712,15 +727,28 @@ function AuctionMiniCard({
       data-testid="auction-mini-card"
       onClick={onOpen}
     >
-      <img src={auction.item.imageUrl} alt="" />
-      <span className="mini-copy">
-        <small>{getPriceLabel(snapshot.status, snapshot.bidCount)}</small>
-        <strong>{formatFen(snapshot.currentPriceFen)}</strong>
-        <em>{auction.item.name}</em>
+      <span className="mini-image-wrap">
+        <img src={auction.item.imageUrl} alt="" />
+        <b>{statusText(snapshot.status)}</b>
       </span>
-      <span className="mini-meta">
-        <Countdown remainingMs={remainingMs} status={snapshot.status} compact />
-        <b>{snapshot.bidCount} 次出价</b>
+      <span className="mini-copy">
+        <em>{auction.item.name}</em>
+        <span className="mini-price-line">
+          <small>{getPriceLabel(snapshot.status, snapshot.bidCount)}</small>
+          <strong>{formatFen(snapshot.currentPriceFen)}</strong>
+        </span>
+        <i>
+          {snapshot.highestBidderMaskedName
+            ? `${snapshot.highestBidderMaskedName} 领先`
+            : "等待首个出价"}
+        </i>
+      </span>
+      <span className="mini-side">
+        <span className="mini-cta">{actionText}</span>
+        {showCountdown ? (
+          <Countdown remainingMs={remainingMs} status={snapshot.status} compact />
+        ) : null}
+        <b>{snapshot.bidCount} 次</b>
       </span>
     </button>
   );
@@ -757,6 +785,9 @@ function AuctionPanel({
     isLeading,
     remainingMs
   );
+  const panelHeadline = getPanelHeadline(snapshot.status);
+  const myBidText =
+    snapshot.myBidAmountFen === null ? "暂未出价" : formatFen(snapshot.myBidAmountFen);
 
   return (
     <div className="sheet-layer" role="presentation">
@@ -768,19 +799,29 @@ function AuctionPanel({
         aria-label="竞拍详情"
         data-testid="auction-panel"
       >
-        <header className="panel-header">
+        <div className="panel-grabber" aria-hidden="true" />
+
+        <header className="panel-countdown-banner">
+          <span className="banner-line" aria-hidden="true" />
+          <strong>{panelHeadline}</strong>
+          <Countdown remainingMs={remainingMs} status={snapshot.status} />
+          <span className="banner-line" aria-hidden="true" />
+          <button type="button" className="close-button" onClick={onClose} aria-label="关闭">
+            ×
+          </button>
+        </header>
+
+        <section className="panel-product-card" aria-label="商品竞拍概览">
           <div className="product-media">
             <img src={auction.item.imageUrl} alt="" />
+            <span>1</span>
           </div>
           <div className="panel-title">
             <span className="status-chip">{statusText(snapshot.status)}</span>
             <h1>{auction.item.name}</h1>
             <p>{auction.item.description}</p>
           </div>
-          <button type="button" className="close-button" onClick={onClose} aria-label="关闭">
-            ×
-          </button>
-        </header>
+        </section>
 
         <div className="selling-points">
           {auction.item.sellingPoints.map((point) => (
@@ -788,31 +829,32 @@ function AuctionPanel({
           ))}
         </div>
 
-        <section className="price-band" aria-label="竞拍价格">
-          <div>
+        <section className="price-board" aria-label="竞拍价格">
+          <div className="price-block current">
             <span>{getPriceLabel(snapshot.status, snapshot.bidCount)}</span>
             <strong data-testid="current-price">{formatFen(snapshot.currentPriceFen)}</strong>
+            <em>
+              {snapshot.highestBidderMaskedName
+                ? `${snapshot.highestBidderMaskedName} 领先`
+                : "暂无领先用户"}
+            </em>
           </div>
-          <Countdown remainingMs={remainingMs} status={snapshot.status} />
+          <div className="price-block mine">
+            <span>{isLeading ? "我的位置" : "我的出价"}</span>
+            <strong data-testid="my-bid-amount">{myBidText}</strong>
+            <em data-testid="my-rank">
+              {snapshot.myRank === null ? "暂无排名" : `第 ${snapshot.myRank} 名`}
+            </em>
+          </div>
         </section>
 
-        <section className="rule-grid" aria-label="竞拍规则">
-          <Metric label="起拍价" value={formatFen(auction.startPriceFen)} />
-          <Metric label="加价幅度" value={formatFen(auction.incrementFen)} />
-          <Metric label="封顶价" value={formatFen(auction.capPriceFen)} />
-          <Metric
-            label="延时"
-            value={`${auction.antiSnipingWindowSeconds}秒 / +${auction.extensionSeconds}秒`}
-          />
-        </section>
-
-        <section className="my-state" aria-label="我的竞拍状态">
-          <span>{isLeading ? "当前您已是最高价" : "我的出价"}</span>
-          <strong data-testid="my-bid-amount">
-            {snapshot.myBidAmountFen === null ? "暂未出价" : formatFen(snapshot.myBidAmountFen)}
-          </strong>
-          <em data-testid="my-rank">
-            {snapshot.myRank === null ? "暂无排名" : `第 ${snapshot.myRank} 名`}
+        <section className={`my-state ${isLeading ? "leading" : ""}`} aria-label="我的竞拍状态">
+          <span>{isLeading ? "当前您已是最高价" : "出价提醒"}</span>
+          <strong>{isLeading ? "守住领先" : `下一口 ${formatFen(snapshot.nextBidAmountFen)}`}</strong>
+          <em>
+            {isLeading
+              ? "有人追价时会第一时间提醒您"
+              : `固定加价 ${formatFen(auction.incrementFen)}，封顶 ${formatFen(auction.capPriceFen)}`}
           </em>
         </section>
 
@@ -834,6 +876,13 @@ function AuctionPanel({
         >
           {bidButtonText}
         </button>
+
+        <section className="rule-strip" aria-label="竞拍规则">
+          <Metric label="起拍" value={formatFen(auction.startPriceFen)} />
+          <Metric label="加价" value={formatFen(auction.incrementFen)} />
+          <Metric label="封顶" value={formatFen(auction.capPriceFen)} />
+          <Metric label="延时" value={`${auction.antiSnipingWindowSeconds}s/+${auction.extensionSeconds}s`} />
+        </section>
 
         <Leaderboard entries={snapshot.leaderboard} />
       </section>
@@ -867,8 +916,8 @@ function BidStepper({
         −
       </button>
       <div>
-        <span>本次出价</span>
         <strong data-testid="selected-bid-amount">{formatFen(selectedAmountFen)}</strong>
+        <span>加价幅度 {formatFen(incrementFen)}</span>
       </div>
       <button
         type="button"
@@ -899,7 +948,7 @@ function Countdown({
 
   return (
     <div className={className}>
-      <span>{running ? "剩余" : "状态"}</span>
+      <span>{running ? (compact ? "剩余" : "倒计时") : "状态"}</span>
       <strong>{running ? formatDuration(remainingMs) : statusText(status)}</strong>
     </div>
   );
@@ -949,7 +998,7 @@ function AuctionResultModal({
   onClose: () => void;
   onMockPay: () => void;
 }) {
-  const { snapshot } = room;
+  const { auction, snapshot } = room;
   const sold = snapshot.status === AuctionStatus.EndedSold;
   const won = sold && orderId !== null;
   const title = won
@@ -965,6 +1014,13 @@ function AuctionResultModal({
       : paymentState === "paying"
         ? "支付中"
         : "模拟支付";
+  const resultCopy = won
+    ? "请确认订单并完成模拟支付。"
+    : sold
+      ? "订单已发送给中拍用户。"
+      : snapshot.status === AuctionStatus.Cancelled
+        ? "本场竞拍被主播取消。"
+        : "本场没有有效出价，未生成订单。";
 
   return (
     <div className="result-layer" role="presentation">
@@ -976,17 +1032,17 @@ function AuctionResultModal({
         aria-label="竞拍结果"
         data-testid="auction-result-modal"
       >
-        <span className={`result-mark ${won ? "won" : ""}`}>
-          {won ? "成交" : statusText(snapshot.status)}
-        </span>
-        <h2>{title}</h2>
-        <p>
-          {won
-            ? "订单已生成，可以完成模拟支付。"
-            : sold
-              ? "本场竞拍已落槌，订单已发送给中拍用户。"
-              : "本场没有生成待支付订单。"}
-        </p>
+        <div className={`result-hero ${won ? "won" : ""}`}>
+          <span>{won ? "落槌定音" : statusText(snapshot.status)}</span>
+          <h2>{title}</h2>
+        </div>
+        <div className="result-product">
+          <img src={auction.item.imageUrl} alt="" />
+          <div>
+            <strong>{auction.item.name}</strong>
+            <span>{resultCopy}</span>
+          </div>
+        </div>
         <div className="result-metrics">
           <Metric label={sold ? "落槌价" : "最终价格"} value={formatFen(snapshot.currentPriceFen)} />
           <Metric label="出价次数" value={`${snapshot.bidCount} 次`} />
@@ -1018,7 +1074,11 @@ function AuctionResultModal({
 }
 
 function BidToast({ message }: { message: string | null }) {
-  return message ? <div className="bid-toast" data-testid="bid-toast">{message}</div> : null;
+  return message ? (
+    <div className={`bid-toast ${getToastTone(message)}`} data-testid="bid-toast">
+      {message}
+    </div>
+  ) : null;
 }
 
 function patchSnapshotFromEvent(
@@ -1169,6 +1229,42 @@ function getPriceLabel(status: AuctionStatus, bidCount: number): string {
   }
 
   return bidCount === 0 ? "起拍价" : "当前最高价";
+}
+
+function getPanelHeadline(status: AuctionStatus): string {
+  if (status === AuctionStatus.Running) {
+    return "距竞拍结束仅剩";
+  }
+
+  if (status === AuctionStatus.Scheduled || status === AuctionStatus.Draft) {
+    return "即将开拍";
+  }
+
+  if (status === AuctionStatus.Cancelled) {
+    return "当前商品竞拍已取消";
+  }
+
+  return "当前商品竞拍已结束";
+}
+
+function getToastTone(message: string): string {
+  if (message.includes("超越")) {
+    return "outbid";
+  }
+
+  if (message.includes("最高价") || message.includes("成功") || message.includes("确认")) {
+    return "leading";
+  }
+
+  if (message.includes("延时")) {
+    return "extended";
+  }
+
+  if (message.includes("结束") || message.includes("成交") || message.includes("取消")) {
+    return "ended";
+  }
+
+  return "info";
 }
 
 function getBidButtonText(

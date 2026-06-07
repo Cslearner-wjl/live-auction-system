@@ -6,6 +6,7 @@ import {
   type AuctionSnapshot
 } from "@live-auction/shared";
 import { io, type Socket } from "socket.io-client";
+import liveCommerceBackgroundUrl from "./assets/live-commerce-background.webp";
 
 export interface LiveRoomViewModel {
   roomId: string;
@@ -186,8 +187,7 @@ export class MobileApiError extends Error {
 const DEFAULT_API_BASE_URL = "http://localhost:3000";
 const DEFAULT_ROOM_ID = "room_1";
 const DEFAULT_USER_ID = "user_1";
-const DEFAULT_STREAM_POSTER_URL =
-  "https://images.unsplash.com/photo-1523906630133-f6934a1ab2b9?auto=format&fit=crop&w=1200&q=80";
+const DEFAULT_STREAM_POSTER_URL = liveCommerceBackgroundUrl;
 const DEFAULT_ITEM_IMAGE_URL =
   "https://images.unsplash.com/photo-1544787219-7f47ccb76574?auto=format&fit=crop&w=900&q=80";
 

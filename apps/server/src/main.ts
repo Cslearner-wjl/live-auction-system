@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module";
+import { createCorsOriginDelegate } from "./common/cors-origins";
 import { resolveUploadStaticRoot } from "./common/upload-paths";
 
 async function bootstrap() {
@@ -17,10 +18,7 @@ async function bootstrap() {
   });
 
   app.enableCors({
-    origin: [
-      process.env.ADMIN_WEB_URL ?? "http://localhost:5173",
-      process.env.MOBILE_WEB_URL ?? "http://localhost:5174"
-    ],
+    origin: createCorsOriginDelegate(),
     credentials: true
   });
 
