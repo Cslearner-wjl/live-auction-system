@@ -1,0 +1,13 @@
+flowchart TD
+  A["Admin 提交商品 + 规则"] --> B["PriceInferenceService 推断整数分价格区间"]
+  B --> C{"AI_PROVIDER?"}
+  C -->|mock| M["MockAiProvider deterministic 输出"]
+  C -->|openai/ark| K{"API Key 配置?"}
+  K -->|否| M
+  K -->|是| R["调用外部模型 (带超时/重试)"]
+  R -->|成功| N["提取 JSON + schema 校验"]
+  R -->|失败| M
+  N --> O["后端价格区间覆盖价格字段"]
+  M --> O
+  O --> P["持久化 AiAuctionInsight + 审计日志"]
+  P --> Q["Admin 可编辑/应用 → 绑定竞拍 → 移动端脱敏展示"]

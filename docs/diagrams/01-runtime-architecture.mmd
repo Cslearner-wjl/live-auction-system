@@ -1,0 +1,56 @@
+flowchart TB
+  subgraph Client["前端层"]
+    Admin["PC 管理后台<br/>React + Vite (:5173)"]
+    Mobile["移动端 H5 直播间<br/>React + Vite (:5174)"]
+  end
+
+  subgraph Server["后端层 — NestJS Server (:3000)"]
+    direction TB
+    REST["REST API<br/>Admin / Public 控制器"]
+    Gateway["Realtime Gateway<br/>Socket.IO 房间隔离"]
+    SM["AuctionStateMachineService<br/>状态机 / 结算"]
+    Bid["BidService + RedisBidAtomicStore<br/>Redis Lua 原子出价"]
+    Sched["AuctionScheduler<br/>单机结束 timer"]
+    Pub["AuctionEventPublisherService<br/>outbox claim/lease 发布"]
+    Cons["AuctionConsistencyService<br/>Redis/DB 对账审计"]
+  end
+
+  subgraph AI["模型层 — AI 竞拍参考（旁路，加分项）"]
+    Price["PriceInferenceService<br/>整数分价格区间推断"]
+    Provider["AI Provider<br/>Mock / OpenAI / Ark(Doubao)"]
+  end
+
+  subgraph Data["数据层"]
+    DB[("MySQL + Prisma<br/>权威业务记录")]
+    Redis[("Redis<br/>热状态 / 分布式锁 / 排行榜")]
+    Outbox[("auction_events 表<br/>outbox")]
+  end
+
+  subgraph External["外部服务"]
+    Vendor["OpenAI Responses API<br/>火山方舟 Ark / Doubao"]
+  end
+
+  Admin -->|REST admin API| REST
+  Mobile -->|REST snapshot / bid| REST
+  Mobile <-->|Socket.IO rooms| Gateway
+
+  REST --> SM
+  REST --> Bid
+  REST --> Price
+  SM --> Sched
+  Bid --> Redis
+  Bid --> DB
+  Bid --> Outbox
+  SM --> DB
+  Outbox --> Pub
+  Pub --> Gateway
+  Cons --> Redis
+  Cons --> DB
+
+  Price --> Provider
+  Provider -.->|可选, 有 Key| Vendor
+  Provider --> DB
+
+  Server --> Shared["packages/shared<br/>状态 / 事件 / 错误码 / Snapshot"]
+  Admin --> Shared
+  Mobile --> Shared

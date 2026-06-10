@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { AdminModule } from "./admin/admin.module";
+import { AiModule } from "./ai/ai.module";
 import { AuctionModule } from "./auction/auction.module";
 import { BidModule } from "./bid/bid.module";
 import { RedisModule } from "./cache/redis.module";
@@ -13,6 +14,7 @@ import { RealtimeModule } from "./realtime/realtime.module";
     PrismaModule,
     RedisModule,
     AuctionModule,
+    AiModule,
     AdminModule,
     BidModule,
     RealtimeModule,

@@ -1,6 +1,6 @@
 # API 契约
 
-本文档定义直播竞拍系统的 REST API 契约。当前已实现管理端商品、竞拍规则配置、启动/取消、定时结束结算、管理端订单查询、管理端创建表单和页面联调、用户端出价、用户端竞拍查询、snapshot、用户订单查询、竞拍历史、模拟支付、服务端 WebSocket/outbox 广播和移动端真实 REST / Socket.IO 联动；AI 卖点接口暂缓，仍按目标契约记录，后续实现代码必须向本文档收敛。
+本文档定义直播竞拍系统的 REST API 契约。当前已实现管理端商品、竞拍规则配置、启动/取消、定时结束结算、管理端订单查询、管理端创建表单和页面联调、AI 竞拍参考助手、用户端出价、用户端竞拍查询、AI 参考读取、snapshot、用户订单查询、竞拍历史、模拟支付、服务端 WebSocket/outbox 广播和移动端真实 REST / Socket.IO 联动。
 
 ## 1. 通用约定
 
@@ -86,6 +86,7 @@ MVP 不实现完整登录鉴权，所有非健康检查接口使用 demo header 
 | `404` | 房间、商品、竞拍、订单不存在 |
 | `409` | 状态冲突、幂等冲突、重复订单、竞拍已结束 |
 | `501` | 目标契约已定义但接口尚未实现 |
+| `502` | AI 模型生成链路失败且无法 fallback |
 
 ### 1.5 通用分页
 
@@ -148,6 +149,27 @@ CANCELLED
 | `antiSnipingWindowSeconds` | integer | 是 | 大于等于 `0` |
 | `extensionSeconds` | integer | 是 | 大于等于 `0`；启用延时时建议 10 到 30 |
 | `maxExtensionCount` | integer | 否 | 缺省为 `0`，表示不延时或按实现配置 |
+
+#### AI Auction Insight DTO
+
+AI 竞拍参考只用于商品解释、适合人群、卖点话术和参考价格区间，不参与出价裁决、状态机、订单结算或 WebSocket 事件。价格字段均为整数分。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `id` | string | 管理端响应必填 | AI 参考记录 ID |
+| `source` | `mock` / `openai` / `ark` / `fallback` | 是 | 内容来源 |
+| `targetAudience` | string[] | 是 | 适合人群，1 到 6 项 |
+| `sellingPointTags` | string[] | 管理端必填 | 卖点标签，1 到 8 项 |
+| `liveScript` | string | 管理端必填 | 可编辑直播讲解词 |
+| `atmosphereCopy` | string | 管理端必填 | 可编辑竞拍氛围话术 |
+| `suggestedStartPriceFen` | integer | 管理端必填 | 建议起拍价 |
+| `suggestedDealMinFen` | integer | 是 | 建议成交区间下限 |
+| `suggestedDealMaxFen` | integer | 是 | 建议成交区间上限 |
+| `suggestedCapPriceFen` | integer | 管理端必填 | 建议封顶价 |
+| `cautionPriceFen` | integer | 是 | 谨慎价 |
+| `priceReasoning` | string | 管理端必填 | 价格推断说明 |
+| `riskNotes` | string[] | 是 | 必须包含“价格仅供参考”或同义提醒 |
+| `confidence` | `low` / `medium` / `high` | 是 | 置信度 |
 
 #### Auction DTO
 
@@ -251,15 +273,17 @@ X-Demo-Role: admin
 - `POST /admin/auctions/:auctionId/cancel`
 - `GET /admin/orders`
 - `GET /admin/orders/:orderId`
+- `POST /admin/ai/auction-insights`
 - `GET /rooms/:roomId/auctions`
 - `GET /auctions/:auctionId`
 - `GET /auctions/:auctionId/snapshot`
+- `GET /auctions/:auctionId/ai-insight`
 - `POST /auctions/:auctionId/bids`
 - `GET /users/me/auction-history`
 - `GET /orders/:orderId`
 - `POST /orders/:orderId/mock-pay`
 
-AI 卖点接口尚未实现；订单由状态机结算流程生成，并可通过管理端订单接口和用户订单接口查询。
+旧 `POST /admin/ai/generate-selling-points` 已被 `POST /admin/ai/auction-insights` 替代，不作为主流程接口。订单由状态机结算流程生成，并可通过管理端订单接口和用户订单接口查询。
 
 2026-06-01 管理端创建页已改为调用 `POST /admin/auctions/with-item`，由后端在同一事务内创建商品、规则和 `SCHEDULED` 竞拍，避免前端串联两个接口时出现“商品已创建但竞拍创建失败”的孤儿商品。单独的 `POST /admin/items` 和 `POST /admin/auctions` 仍保留给独立管理场景。
 
@@ -464,6 +488,7 @@ Request DTO：
 | `antiSnipingWindowSeconds` | integer | 是 | 大于等于 `0` |
 | `extensionSeconds` | integer | 是 | 大于等于 `0` |
 | `maxExtensionCount` | integer | 否 | 大于等于 `0` |
+| `aiInsight` | object | 否 | 后台编辑后的 AI Auction Insight DTO；传入时在同一事务内绑定到新商品和新竞拍 |
 
 201：返回 Auction DTO。
 
@@ -477,6 +502,95 @@ curl -X POST http://localhost:3000/admin/auctions/with-item \
   -H "X-Demo-User-Id: admin_1" \
   -H "X-Demo-Role: admin" \
   -d "{\"roomId\":\"room_1\",\"item\":{\"name\":\"翡翠手镯\",\"imageUrl\":\"https://example.com/item.png\",\"description\":\"天然翡翠手镯\",\"sellingPoints\":[\"支持鉴定\",\"包邮\"]},\"startPriceFen\":0,\"incrementFen\":1000,\"durationSeconds\":300,\"capPriceFen\":100000,\"antiSnipingWindowSeconds\":10,\"extensionSeconds\":15,\"maxExtensionCount\":3}"
+```
+
+### POST /admin/ai/auction-insights
+
+生成 AI 竞拍参考。已实现。该接口只允许管理端调用；后端先用 `PriceInferenceService` 基于竞拍规则和可选市场信息计算整数分价格区间，再让 mock、OpenAI 或火山方舟 Ark / Doubao 兼容接口生成自然语言说明。无 `AI_API_KEY`、模型调用失败、JSON 解析失败或 schema 校验失败时返回 deterministic mock fallback。
+
+环境变量：
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `AI_PROVIDER` | `mock` | `mock`、`openai` 或 `ark` |
+| `AI_BASE_URL` | provider 默认值 | OpenAI-compatible base URL；`ark` 默认 `https://ark.cn-beijing.volces.com/api/v3` |
+| `AI_API_KEY` | 空 | 仅后端读取；不得写入前端 |
+| `AI_MODEL` | `gpt-4.1-mini` | OpenAI model 或 Ark endpoint id，例如 `ep-xxxx` |
+| `AI_API_MODE` | provider 默认值 | `openai` 默认 `responses`，`ark` 默认 `chat_completions` |
+| `AI_CHAT_RESPONSE_FORMAT` | 空 | Chat Completions response format；Ark 默认不发送该字段，可按模型能力设为 `json_object`、`json_schema` 或 `none` |
+| `AI_TIMEOUT_MS` | `8000` | 单次请求超时 |
+| `AI_MAX_RETRIES` | `1` | 模型请求失败后的重试次数 |
+
+Request DTO：
+
+| 字段 | 类型 | 必填 | 校验 |
+| --- | --- | --- | --- |
+| `itemName` | string | 是 | 1 到 80 字符 |
+| `description` | string | 是 | 1 到 2000 字符 |
+| `sellingPoints` | string[] | 否 | 最多 10 项 |
+| `roomId` | string | 否 | 直播间 ID，用于审计 |
+| `auctionRule` | object | 是 | 同 Auction Rule DTO |
+| `optionalMarketInfo.costPriceFen` | integer | 否 | 成本价，仅后端使用，不返回用户端 |
+| `optionalMarketInfo.referenceMarketPriceFen` | integer | 否 | 内部参考价，仅后端使用，不返回用户端 |
+| `optionalMarketInfo.condition` | string | 否 | 商品成色 |
+| `optionalMarketInfo.brandOrOrigin` | string | 否 | 品牌或产地 |
+| `optionalMarketInfo.targetAudienceHint` | string | 否 | 主播输入的人群提示 |
+
+200：
+
+```json
+{
+  "id": "insight_1",
+  "source": "mock",
+  "targetAudience": ["茶文化爱好者", "入门级茶具用户", "送礼用户"],
+  "sellingPointTags": ["手工", "茶具", "日常泡茶"],
+  "suggestedStartPriceFen": 0,
+  "suggestedDealMinFen": 29900,
+  "suggestedDealMaxFen": 59900,
+  "suggestedCapPriceFen": 79900,
+  "cautionPriceFen": 65000,
+  "priceReasoning": "价格仅作为直播竞拍参考，不作为专业鉴定。",
+  "liveScript": "这套茶具适合喜欢泡茶的朋友，也适合作为礼品。",
+  "atmosphereCopy": "当前价格可以对照参考成交区间理性判断。",
+  "riskNotes": ["价格仅供参考，请结合商品图片、描述和主播说明理性出价"],
+  "confidence": "medium",
+  "itemId": null,
+  "auctionId": null,
+  "createdAt": "2026-06-09T05:00:00.000Z",
+  "updatedAt": "2026-06-09T05:00:00.000Z"
+}
+```
+
+错误：`400 VALIDATION_FAILED`、`401 UNAUTHORIZED`、`403 FORBIDDEN`、`502 VALIDATION_FAILED`。
+
+AuditLog：
+
+- 成功：`AI_GENERATION_SUCCEEDED`
+- fallback：`AI_GENERATION_FALLBACK`
+- 无法 fallback：`AI_GENERATION_FAILED`
+
+AuditLog metadata 只记录 provider/source/fallbackReason 等脱敏摘要，不记录 API Key、完整 prompt、完整授权头、模型原始响应或成本价明细。模型返回的价格字段不是权威值，后端会用 `PriceInferenceService` 的整数分区间覆盖 `suggestedStartPriceFen`、`suggestedDealMinFen`、`suggestedDealMaxFen`、`suggestedCapPriceFen` 和 `cautionPriceFen`；模型只负责人群、卖点、话术和解释文本。
+
+Doubao Ark 本地配置示例：
+
+```dotenv
+AI_PROVIDER=ark
+AI_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+AI_MODEL=ep-xxxxxxxxxxxxxxxx
+AI_API_KEY=ark-xxxx
+AI_API_MODE=chat_completions
+AI_CHAT_RESPONSE_FORMAT=none
+AI_TIMEOUT_MS=30000
+```
+
+curl：
+
+```bash
+curl -X POST http://localhost:3000/admin/ai/auction-insights \
+  -H "Content-Type: application/json" \
+  -H "X-Demo-User-Id: admin_1" \
+  -H "X-Demo-Role: admin" \
+  -d "{\"itemName\":\"紫砂茶具套装\",\"description\":\"一壶四杯，适合日常泡茶和送礼\",\"sellingPoints\":[\"手工\",\"茶具\"],\"roomId\":\"room_1\",\"auctionRule\":{\"startPriceFen\":0,\"incrementFen\":2000,\"durationSeconds\":300,\"capPriceFen\":89900,\"antiSnipingWindowSeconds\":10,\"extensionSeconds\":15,\"maxExtensionCount\":3}}"
 ```
 
 ### GET /admin/auctions
@@ -748,39 +862,7 @@ Request DTO：
 
 ### POST /admin/ai/generate-selling-points
 
-目标契约：生成商品卖点和直播话术。当前代码库未实现该路由，不纳入最终主流程演示；后续实现时必须从后端读取 AI 环境变量，缺少 AI API Key 时返回确定性 mock 内容，不得从前端直接调用 AI。
-
-Request DTO：
-
-| 字段 | 类型 | 必填 | 校验 |
-| --- | --- | --- | --- |
-| `itemName` | string | 是 | 1 到 80 字符 |
-| `description` | string | 是 | 1 到 2000 字符 |
-| `startPriceFen` | integer | 是 | 大于等于 `0` |
-| `targetAudience` | string | 否 | 最多 80 字符 |
-
-后续实现后的 200：
-
-```json
-{
-  "tags": ["支持鉴定", "收藏级"],
-  "script": "这款商品适合关注品质和收藏价值的用户。",
-  "auctionAtmosphereCopy": "喜欢的朋友可以先出价锁定领先位置。",
-  "source": "mock"
-}
-```
-
-错误：`400 VALIDATION_FAILED`、`401 UNAUTHORIZED`、`403 FORBIDDEN`、`501`。
-
-后续实现后的 curl：
-
-```bash
-curl -X POST http://localhost:3000/admin/ai/generate-selling-points \
-  -H "Content-Type: application/json" \
-  -H "X-Demo-User-Id: admin_1" \
-  -H "X-Demo-Role: admin" \
-  -d "{\"itemName\":\"翡翠手镯\",\"description\":\"天然翡翠手镯\",\"startPriceFen\":0,\"targetAudience\":\"珠宝收藏用户\"}"
-```
+旧目标契约：生成商品卖点和直播话术。该路由已被 `POST /admin/ai/auction-insights` 替代；当前代码库不实现此旧路由，不纳入主流程演示。
 
 ## 4. 用户端 API
 
@@ -903,6 +985,34 @@ curl：
 
 ```bash
 curl http://localhost:3000/auctions/auction_1/snapshot \
+  -H "X-Demo-User-Id: user_1" \
+  -H "X-Demo-Role: bidder"
+```
+
+### GET /auctions/:auctionId/ai-insight
+
+查询用户端脱敏 AI 竞拍参考。已实现。不会返回主播输入的成本价、内部市场参考价、完整 prompt、inputSnapshot 或模型原始响应。移动端读取失败时应忽略，不影响 snapshot、倒计时或出价按钮。
+
+200：
+
+```json
+{
+  "source": "mock",
+  "targetAudience": ["茶文化爱好者", "入门级茶具用户", "送礼用户"],
+  "suggestedDealMinFen": 29900,
+  "suggestedDealMaxFen": 59900,
+  "cautionPriceFen": 65000,
+  "riskNotes": ["价格仅供参考，请结合商品图片、描述和主播说明理性出价"],
+  "confidence": "medium"
+}
+```
+
+错误：`401 UNAUTHORIZED`、`403 FORBIDDEN`、`404 AI_INSIGHT_NOT_FOUND`。
+
+curl：
+
+```bash
+curl http://localhost:3000/auctions/auction_1/ai-insight \
   -H "X-Demo-User-Id: user_1" \
   -H "X-Demo-Role: bidder"
 ```

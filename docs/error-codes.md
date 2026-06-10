@@ -23,6 +23,7 @@
 | `ITEM_NOT_FOUND` | 404 | 否 | 商品不存在 | `itemId` |
 | `ROOM_NOT_FOUND` | 404 | 否 | 直播间不存在 | `roomId` |
 | `ORDER_NOT_FOUND` | 404 | 否 | 订单不存在 | `orderId` |
+| `AI_INSIGHT_NOT_FOUND` | 404 | 否 | AI 竞拍参考不存在 | `auctionId` |
 | `AUCTION_NOT_RUNNING` | 409 | 是，`BID_REJECTED` | 当前竞拍未开始 | `auctionId`, `status` |
 | `AUCTION_ALREADY_ENDED` | 409 | 是，`BID_REJECTED` | 当前竞拍已结束 | `auctionId`, `status` |
 | `AUCTION_CANCELLED` | 409 | 是，`BID_REJECTED` | 当前竞拍已取消 | `auctionId` |

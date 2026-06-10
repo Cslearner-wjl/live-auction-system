@@ -2,6 +2,8 @@
 
 本文档定义直播竞拍系统的 WebSocket 契约。事件名必须与 `packages/shared/src/websocket-events.ts` 保持一致。当前服务端已基于 Socket.IO 实现 gateway、房间加入、snapshot 请求、心跳、Socket.IO 出价和 outbox 广播；移动端已接入真实 Socket.IO 事件，并以 snapshot 作为权威状态来源。
 
+AI 竞拍参考助手不新增 WebSocket 事件。后台生成和移动端展示均通过 REST 完成，客户端不得依赖 AI 事件恢复状态。
+
 ## 1. 房间约定
 
 ```txt

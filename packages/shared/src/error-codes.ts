@@ -3,6 +3,7 @@ export enum AuctionErrorCode {
   ItemNotFound = "ITEM_NOT_FOUND",
   RoomNotFound = "ROOM_NOT_FOUND",
   OrderNotFound = "ORDER_NOT_FOUND",
+  AiInsightNotFound = "AI_INSIGHT_NOT_FOUND",
   AuctionNotRunning = "AUCTION_NOT_RUNNING",
   AuctionAlreadyEnded = "AUCTION_ALREADY_ENDED",
   AuctionCancelled = "AUCTION_CANCELLED",

@@ -16,6 +16,7 @@
 apps/admin
   PC 商家 / 主播后台
   - 商品创建
+  - AI 竞拍参考生成 / 编辑
   - 规则配置
   - 竞拍启动 / 取消
   - 订单查看
@@ -25,12 +26,15 @@ apps/mobile
   - 直播间展示
   - 竞拍小卡片
   - 底部竞拍面板
+  - AI 参考卡片
   - 实时提醒和结果展示
 
 apps/server
   后端 API 和实时服务
   - Admin REST API
   - Public REST API
+  - AiAuctionInsightService
+  - PriceInferenceService
   - AuctionStateMachineService
   - BidService
   - AuctionSnapshotService
@@ -60,6 +64,7 @@ flowchart LR
   Gateway --> Redis
   Gateway --> Mobile
   Server --> Shared["packages/shared"]
+  Server --> AI["AI provider / mock fallback"]
   Admin --> Shared
   Mobile --> Shared
 ```
@@ -70,8 +75,9 @@ flowchart LR
 
 ```txt
 后台创建商品
+  -> 可选生成 / 编辑 AI 竞拍参考
   -> 配置规则
-  -> 创建 AuctionSession(SCHEDULED)
+  -> 创建 AuctionSession(SCHEDULED) 并绑定 AI insight
   -> 启动竞拍
   -> 状态机流转到 RUNNING
   -> 安排结束 timer
@@ -118,11 +124,14 @@ flowchart LR
 - `AuctionConsistencyService` 已周期扫描 Redis 热状态和 DB `AuctionSession`，发现 `status`、当前价、最高出价人、结束时间、出价数、延时次数、`serverSeq` 或排行榜数量差异时写审计日志；当前不自动修复。
 - 已通过真实 HTTP + MySQL + Redis 压测覆盖 30/100 并发出价，并在压测中修复 Redis Lua payload 解析和 DB 持久化顺序问题。
 - Redis/DB 对账目前是检测和审计能力；自动修复仍需单独设计人工确认或 repair 命令。
+- `AiAuctionInsightService` 已实现后台生成 AI 竞拍参考、无 Key deterministic mock/fallback、OpenAI Responses API 调用、火山方舟 Ark / Doubao OpenAI-compatible Chat Completions 调用、输出 JSON 提取与 schema 校验、AuditLog 脱敏和用户端脱敏读取；AI 不进入出价、状态机、订单或 WebSocket 事件链路。
+- AI provider 解析模型 JSON 后会用 `PriceInferenceService` 的整数分 priceRange 覆盖价格字段，避免模型随机输出字符串、单位或越界价格；模型输出只影响文案类参考字段。
 
 当前管理端实现状态：
 
 - `apps/admin` 已接入管理端 API，提供商品上架、竞拍规则配置、竞拍列表、状态筛选、启动 / 取消操作和订单列表。
 - 管理端创建页通过 `POST /admin/auctions/with-item` 在后端事务内创建商品、规则和 `SCHEDULED` 竞拍；单独的商品和竞拍接口仍保留。
+- 管理端创建页可调用 `POST /admin/ai/auction-insights` 生成适合人群、卖点话术和参考价格区间，主播可编辑并应用建议卖点、起拍价或封顶价。
 - 管理端页面只消费 API 状态，不实现竞拍状态机；规则合法性、启动和取消合法性仍由后端校验和状态机兜底。
 - 管理端 API DTO 已补充商品标签、商品图、买家脱敏名和竞拍状态等展示字段。
 - 管理端路由采用轻量 SPA path 映射：`/admin/auctions`、`/admin/items/new`、`/admin/orders`；生产部署需要 fallback 到同一个前端入口。
@@ -132,6 +141,7 @@ flowchart LR
 - `apps/mobile` 已实现直播间主页面、竞拍小卡片、底部半屏竞拍面板、出价步进器、倒计时、toast 和本地排行榜展示。
 - `mobile-auction-service.ts` 已替换为真实 REST service，负责读取房间竞拍列表、竞拍详情、snapshot 和提交 HTTP 出价。
 - 移动端 Socket.IO client 连接后加入 `room:{roomId}` 和 `auction:{auctionId}`，并通过 `requestSnapshot` 做首次同步和重连恢复。
+- 移动端额外读取 `GET /auctions/:auctionId/ai-insight` 展示脱敏 AI 参考卡片；读取失败不影响竞拍面板和出价。
 - 页面以 `GET /auctions/:auctionId/snapshot` / `AUCTION_SNAPSHOT` 的 `serverTime`、`serverSeq` 和业务字段作为权威状态来源，不在前端复制竞拍状态机。
 - 移动端按 `serverSeq` 丢弃旧事件，发现跳号时重新拉取 snapshot；`BID_ACCEPTED` 等事件先做轻量 UI 提示，再用 snapshot 对齐完整排行榜和我的排名。
 - 出价按钮提交真实 `POST /auctions/:auctionId/bids`，生成稳定 `clientBidId`，后端错误码和消息直接展示给用户。
@@ -220,6 +230,7 @@ stateDiagram-v2
 - `Order`
 - `AuctionEvent`
 - `AuditLog`
+- `AiAuctionInsight`
 
 关键约束：
 

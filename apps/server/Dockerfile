@@ -17,4 +17,7 @@ RUN pnpm --filter @live-auction/shared build \
 ENV NODE_ENV=production
 EXPOSE 3000
 
-CMD ["node", "apps/server/dist/main.js"]
+COPY apps/server/docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
+CMD ["/app/docker-entrypoint.sh"]

@@ -858,6 +858,13 @@ function AuctionPanel({
           </em>
         </section>
 
+        {room.aiInsight ? (
+          <AiReferenceCard
+            insight={room.aiInsight}
+            currentPriceFen={snapshot.currentPriceFen}
+          />
+        ) : null}
+
         <BidStepper
           selectedAmountFen={selectedAmountFen}
           minAmountFen={snapshot.nextBidAmountFen}
@@ -960,6 +967,41 @@ function Metric({ label, value }: { label: string; value: string }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function AiReferenceCard({
+  insight,
+  currentPriceFen
+}: {
+  insight: NonNullable<LiveRoomViewModel["aiInsight"]>;
+  currentPriceFen: number;
+}) {
+  return (
+    <section className="ai-reference-card" aria-label="AI 竞拍参考">
+      <header>
+        <strong>AI 竞拍参考</strong>
+        <span>{insight.source}</span>
+      </header>
+      <div className="ai-targets">
+        {insight.targetAudience.slice(0, 3).map((target) => (
+          <span key={target}>{target}</span>
+        ))}
+      </div>
+      <div className="ai-reference-metrics">
+        <Metric
+          label="参考成交区间"
+          value={`${formatFen(insight.suggestedDealMinFen)} - ${formatFen(
+            insight.suggestedDealMaxFen
+          )}`}
+        />
+        <Metric
+          label="当前价格状态"
+          value={getAiPriceStatus(insight, currentPriceFen)}
+        />
+      </div>
+      <p>价格仅供参考，请理性出价</p>
+    </section>
   );
 }
 
@@ -1229,6 +1271,25 @@ function getPriceLabel(status: AuctionStatus, bidCount: number): string {
   }
 
   return bidCount === 0 ? "起拍价" : "当前最高价";
+}
+
+function getAiPriceStatus(
+  insight: NonNullable<LiveRoomViewModel["aiInsight"]>,
+  currentPriceFen: number
+): string {
+  if (currentPriceFen > insight.cautionPriceFen) {
+    return "已高于谨慎价";
+  }
+
+  if (currentPriceFen < insight.suggestedDealMinFen) {
+    return "低于参考区间";
+  }
+
+  if (currentPriceFen <= insight.suggestedDealMaxFen) {
+    return "处于参考区间内";
+  }
+
+  return "高于参考区间";
 }
 
 function getPanelHeadline(status: AuctionStatus): string {

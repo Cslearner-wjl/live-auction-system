@@ -13,6 +13,7 @@
 | 用户订单 | `apps/server/src/order/user-orders.service.test.ts` | 竞拍历史、订单详情、买家权限、模拟支付 |
 | 服务级闭环 | `apps/server/src/day10-core-loop.e2e.test.ts` | 创建商品、创建竞拍、启动、封顶成交、后台订单可见 |
 | 服务级异常场景 | `apps/server/src/day11-auction-scenarios.e2e.test.ts` | 流拍、一人成交、连续出价、延时、取消、幂等、snapshot 恢复 |
+| AI 竞拍参考助手 | `apps/server/src/ai/*.test.ts` | 价格推断、mock 输出稳定性、schema 校验、OpenAI/Ark provider 适配、缺 Key fallback、模型异常 fallback、AuditLog 脱敏、AI insight 权限边界 |
 | 浏览器全链路 | `tests/e2e/live-auction-flow.spec.ts` | Playwright 覆盖后台创建商品和竞拍、启动竞拍、两个移动端用户交替出价、被超越提示、刷新 / 重连 snapshot、封顶成交、模拟支付、后台订单可见 |
 | 真实 HTTP 压测 | `pnpm perf:day12` | 真实 server + MySQL + Redis，30/100 并发出价一致性通过 |
 
@@ -24,6 +25,10 @@
 | 数据库准备 | 依赖已启动 | `pnpm --filter @live-auction/server prisma:migrate`、`pnpm --filter @live-auction/server prisma:seed` | schema up to date，demo 数据重置 | 已完成 |
 | 后端健康检查 | server 已启动 | 打开 `http://localhost:3000/health` | `status=ok`，DB/Redis 均 ok | 待最终执行 |
 | 后台创建商品和竞拍 | admin 已启动 | 打开 `/admin/items/new`，填写商品和规则后提交 | 生成 `SCHEDULED` 竞拍，列表可见 | 2026-06-03：基本流程已手测跑通；2026-06-04：Playwright 浏览器 E2E 已覆盖 |
+| AI 参考 mock/fallback | 后端无 `AI_API_KEY`，或 `AI_PROVIDER=mock` | 后台填写商品和规则，点击“AI 生成竞拍参考” | 生成 source=`mock` 或 `fallback` 的稳定结果；可编辑适合人群、卖点、话术和价格字段 | 单元测试已覆盖；真实页面待最终手测 |
+| AI 输出编辑和绑定 | 已生成 AI 参考 | 编辑 AI 输出，点击“应用建议卖点 / 起拍价 / 封顶价”，再创建竞拍 | 商品卖点和规则字段按按钮应用；创建成功后 AI insight 绑定到新竞拍 | 待最终手测 |
+| 移动端 AI 参考卡片 | 已创建并启动带 AI insight 的竞拍 | 打开移动端竞拍面板 | 展示适合人群、参考成交区间、当前价格状态和“价格仅供参考，请理性出价”；AI 请求失败不影响出价 | 待最终手测 |
+| OpenAI / Ark 真实 Key 验证 | 本地 `.env` 设置 `AI_PROVIDER=openai` 或 `AI_PROVIDER=ark`、`AI_API_KEY`、`AI_MODEL`，Ark 使用 endpoint id | 重启后端，后台点击 AI 生成 | 成功时 source=`openai` 或 `ark`；模型异常时 fallback，不暴露密钥 | 2026-06-09：Ark provider 和 `POST /admin/ai/auction-insights` 已用本地真实 key 验证返回 source=`ark`；页面按钮待手动复核 |
 | 0 元起拍 | 创建页起拍价填 `0` | 提交后启动竞拍 | `currentPriceFen=0`，可按固定加价出价 | 单元测试已覆盖；真实页面待最终手测 |
 | 后台启动竞拍 | 存在 `SCHEDULED` 竞拍 | 点击启动 | 状态变为 `RUNNING`，移动端可见 | 服务级 e2e 和 Playwright 浏览器 E2E 已覆盖 |
 | 三用户实时出价 | 同一竞拍 `RUNNING` | 打开 user_1、user_2、user_3 三个移动端窗口交替出价 | 当前价单调递增，领先 / 被超越提示正确，第三用户可参与 | 2026-06-03：user_3 问题已复测通过；2026-06-04：Playwright 已覆盖 user_1 / user_2 / user_1 交替出价和被超越提示 |

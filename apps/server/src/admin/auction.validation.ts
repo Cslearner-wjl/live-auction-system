@@ -20,6 +20,7 @@ export interface CreateAuctionPayload extends AuctionRulePayload {
 export interface CreateAuctionWithItemPayload extends AuctionRulePayload {
   roomId?: unknown;
   item?: unknown;
+  aiInsight?: unknown;
 }
 
 export interface CreateAuctionValues {
@@ -32,6 +33,7 @@ export interface CreateAuctionWithItemValues {
   roomId: string;
   item: ItemValues;
   rule: AuctionRuleValues;
+  aiInsight?: unknown;
 }
 
 export interface CancelAuctionPayload {
@@ -56,7 +58,8 @@ export function parseCreateAuctionWithItem(
   return {
     roomId: readRequiredString(payload.roomId, "roomId", 191),
     item: parseCreateItem(payload.item as ItemPayload),
-    rule: parseCreateAuctionRule(payload)
+    rule: parseCreateAuctionRule(payload),
+    aiInsight: payload.aiInsight
   };
 }
 

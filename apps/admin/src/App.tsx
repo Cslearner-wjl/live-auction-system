@@ -32,9 +32,7 @@ interface CreateAuctionForm {
   maxExtensionCount: string;
 }
 
-interface CreateAuctionPayload {
-  roomId: string;
-  itemId: string;
+interface AuctionRulePayload {
   startPriceFen: number;
   incrementFen: number;
   durationSeconds: number;
@@ -42,6 +40,11 @@ interface CreateAuctionPayload {
   antiSnipingWindowSeconds: number;
   extensionSeconds: number;
   maxExtensionCount: number;
+}
+
+interface CreateAuctionPayload extends AuctionRulePayload {
+  roomId: string;
+  itemId: string;
 }
 
 interface AuctionListItem {
@@ -117,6 +120,60 @@ interface UploadImageResponse {
   path: string;
 }
 
+type AiInsightSource = "mock" | "openai" | "ark" | "fallback";
+type AiInsightConfidence = "low" | "medium" | "high";
+
+interface AiAuctionInsightResponse {
+  id: string;
+  source: AiInsightSource;
+  targetAudience: string[];
+  sellingPointTags: string[];
+  suggestedStartPriceFen: number;
+  suggestedDealMinFen: number;
+  suggestedDealMaxFen: number;
+  suggestedCapPriceFen: number;
+  cautionPriceFen: number;
+  priceReasoning: string;
+  liveScript: string;
+  atmosphereCopy: string;
+  riskNotes: string[];
+  confidence: AiInsightConfidence;
+}
+
+interface AiInsightForm {
+  id?: string;
+  source: AiInsightSource;
+  targetAudienceText: string;
+  sellingPointTagsText: string;
+  liveScript: string;
+  atmosphereCopy: string;
+  suggestedStartPriceYuan: string;
+  suggestedDealMinYuan: string;
+  suggestedDealMaxYuan: string;
+  suggestedCapPriceYuan: string;
+  cautionPriceYuan: string;
+  priceReasoning: string;
+  riskNotesText: string;
+  confidence: AiInsightConfidence;
+}
+
+interface AiInsightPayload {
+  id?: string;
+  source: AiInsightSource;
+  targetAudience: string[];
+  sellingPointTags: string[];
+  suggestedStartPriceFen: number;
+  suggestedDealMinFen: number;
+  suggestedDealMaxFen: number;
+  suggestedCapPriceFen: number;
+  cautionPriceFen: number;
+  priceReasoning: string;
+  liveScript: string;
+  atmosphereCopy: string;
+  riskNotes: string[];
+  confidence: AiInsightConfidence;
+}
+
 const initialCreateAuctionForm: CreateAuctionForm = {
   roomId: "room_1",
   name: "",
@@ -175,6 +232,8 @@ export function App() {
   const [createForm, setCreateForm] = useState<CreateAuctionForm>(initialCreateAuctionForm);
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [imageUploading, setImageUploading] = useState(false);
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiInsightForm, setAiInsightForm] = useState<AiInsightForm | null>(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -210,6 +269,20 @@ export function App() {
       ...current,
       [field]: value
     }));
+  }
+
+  function updateAiInsightForm<Field extends keyof AiInsightForm>(
+    field: Field,
+    value: AiInsightForm[Field]
+  ) {
+    setAiInsightForm((current) =>
+      current
+        ? {
+            ...current,
+            [field]: value
+          }
+        : current
+    );
   }
 
   async function refreshDashboard(statusOverride: AuctionStatus | "ALL" = auctionStatus) {
@@ -248,7 +321,8 @@ export function App() {
         body: JSON.stringify({
           ...auctionPayload,
           itemId: undefined,
-          item: itemPayload
+          item: itemPayload,
+          ...(aiInsightForm ? { aiInsight: toAiInsightPayload(aiInsightForm) } : {})
         })
       });
 
@@ -256,6 +330,7 @@ export function App() {
         ...initialCreateAuctionForm,
         roomId: createForm.roomId
       });
+      setAiInsightForm(null);
       setAuctionStatus("ALL");
       await refreshDashboard("ALL");
       switchView("auctions");
@@ -298,6 +373,68 @@ export function App() {
     } finally {
       setImageUploading(false);
     }
+  }
+
+  async function generateAiInsight() {
+    setAiGenerating(true);
+    setMessage(null);
+    setMessageTone("info");
+
+    try {
+      const rule = toAuctionRulePayload(createForm);
+      const result = await requestJson<AiAuctionInsightResponse>("/admin/ai/auction-insights", {
+        method: "POST",
+        body: JSON.stringify({
+          itemName: readRequiredText(createForm.name, "商品名称"),
+          description: readRequiredText(createForm.description, "商品介绍"),
+          sellingPoints: parseSellingPoints(createForm.sellingPointsText),
+          roomId: readRequiredText(createForm.roomId, "直播间 ID"),
+          auctionRule: rule
+        })
+      });
+
+      setAiInsightForm(toAiInsightForm(result));
+      setMessageTone("info");
+      setMessage(
+        result.source === "openai" || result.source === "ark"
+          ? "AI 竞拍参考已生成，可继续编辑后创建竞拍。"
+          : "AI 竞拍参考已使用 mock/fallback 生成，可继续编辑后创建竞拍。"
+      );
+    } catch (error: unknown) {
+      setMessageTone("error");
+      setMessage(toErrorMessage(error));
+    } finally {
+      setAiGenerating(false);
+    }
+  }
+
+  function applySuggestedSellingPoints() {
+    if (!aiInsightForm) {
+      return;
+    }
+
+    updateCreateForm("sellingPointsText", aiInsightForm.sellingPointTagsText);
+  }
+
+  function applySuggestedStartPrice() {
+    if (!aiInsightForm) {
+      return;
+    }
+
+    updateCreateForm("startPriceYuan", aiInsightForm.suggestedStartPriceYuan);
+  }
+
+  function applySuggestedCapPrice() {
+    if (!aiInsightForm) {
+      return;
+    }
+
+    updateCreateForm("capPriceYuan", aiInsightForm.suggestedCapPriceYuan);
+  }
+
+  function resetCreateState() {
+    setCreateForm(initialCreateAuctionForm);
+    setAiInsightForm(null);
   }
 
   async function startAuction(auctionId: string) {
@@ -680,6 +817,37 @@ export function App() {
               </div>
             </div>
 
+            <div className="form-section ai-section">
+              <div className="section-heading-row">
+                <div>
+                  <h3>AI 竞拍参考</h3>
+                  <small>生成内容可编辑，创建流程不依赖 AI 成功。</small>
+                </div>
+                <button
+                  type="button"
+                  className="primary"
+                  data-testid="generate-ai-insight"
+                  disabled={aiGenerating || createSubmitting}
+                  onClick={() => void generateAiInsight()}
+                >
+                  {aiGenerating ? "生成中" : "AI 生成竞拍参考"}
+                </button>
+              </div>
+
+              {aiInsightForm ? (
+                <AiInsightEditor
+                  value={aiInsightForm}
+                  disabled={createSubmitting}
+                  onChange={updateAiInsightForm}
+                  onApplySellingPoints={applySuggestedSellingPoints}
+                  onApplyStartPrice={applySuggestedStartPrice}
+                  onApplyCapPrice={applySuggestedCapPrice}
+                />
+              ) : (
+                <p className="ai-empty-state">未生成 AI 参考时也可以直接手动创建竞拍。</p>
+              )}
+            </div>
+
             <div className="form-actions">
               <button
                 type="submit"
@@ -691,7 +859,7 @@ export function App() {
               </button>
               <button
                 type="button"
-                onClick={() => setCreateForm(initialCreateAuctionForm)}
+                onClick={resetCreateState}
                 disabled={createSubmitting}
               >
                 重置
@@ -819,6 +987,159 @@ function StatusBadge({ status }: { status: AuctionStatus }) {
   return <span className={`auction-badge ${status.toLowerCase()}`}>{statusLabels[status]}</span>;
 }
 
+function AiInsightEditor({
+  value,
+  disabled,
+  onChange,
+  onApplySellingPoints,
+  onApplyStartPrice,
+  onApplyCapPrice
+}: {
+  value: AiInsightForm;
+  disabled: boolean;
+  onChange: <Field extends keyof AiInsightForm>(
+    field: Field,
+    nextValue: AiInsightForm[Field]
+  ) => void;
+  onApplySellingPoints: () => void;
+  onApplyStartPrice: () => void;
+  onApplyCapPrice: () => void;
+}) {
+  return (
+    <div className="ai-insight-editor" data-testid="ai-insight-editor">
+      <div className="ai-source-row">
+        <span className={`ai-source ${value.source}`}>source: {value.source}</span>
+        <label>
+          <span>置信度</span>
+          <select
+            value={value.confidence}
+            disabled={disabled}
+            onChange={(event) =>
+              onChange("confidence", event.target.value as AiInsightConfidence)
+            }
+          >
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="form-grid">
+        <label>
+          <span>适合人群</span>
+          <input
+            value={value.targetAudienceText}
+            disabled={disabled}
+            onChange={(event) => onChange("targetAudienceText", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>卖点标签</span>
+          <input
+            value={value.sellingPointTagsText}
+            disabled={disabled}
+            onChange={(event) => onChange("sellingPointTagsText", event.target.value)}
+          />
+        </label>
+        <label className="span-2">
+          <span>直播讲解词</span>
+          <textarea
+            value={value.liveScript}
+            disabled={disabled}
+            rows={3}
+            onChange={(event) => onChange("liveScript", event.target.value)}
+          />
+        </label>
+        <label className="span-2">
+          <span>竞拍氛围话术</span>
+          <textarea
+            value={value.atmosphereCopy}
+            disabled={disabled}
+            rows={3}
+            onChange={(event) => onChange("atmosphereCopy", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>建议起拍价（元）</span>
+          <input
+            value={value.suggestedStartPriceYuan}
+            inputMode="decimal"
+            disabled={disabled}
+            onChange={(event) => onChange("suggestedStartPriceYuan", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>建议成交下限（元）</span>
+          <input
+            value={value.suggestedDealMinYuan}
+            inputMode="decimal"
+            disabled={disabled}
+            onChange={(event) => onChange("suggestedDealMinYuan", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>建议成交上限（元）</span>
+          <input
+            value={value.suggestedDealMaxYuan}
+            inputMode="decimal"
+            disabled={disabled}
+            onChange={(event) => onChange("suggestedDealMaxYuan", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>建议封顶价（元）</span>
+          <input
+            value={value.suggestedCapPriceYuan}
+            inputMode="decimal"
+            disabled={disabled}
+            onChange={(event) => onChange("suggestedCapPriceYuan", event.target.value)}
+          />
+        </label>
+        <label>
+          <span>谨慎价（元）</span>
+          <input
+            value={value.cautionPriceYuan}
+            inputMode="decimal"
+            disabled={disabled}
+            onChange={(event) => onChange("cautionPriceYuan", event.target.value)}
+          />
+        </label>
+        <label className="span-2">
+          <span>价格推断说明</span>
+          <textarea
+            value={value.priceReasoning}
+            disabled={disabled}
+            rows={3}
+            onChange={(event) => onChange("priceReasoning", event.target.value)}
+          />
+        </label>
+        <label className="span-2">
+          <span>风险提示</span>
+          <textarea
+            value={value.riskNotesText}
+            disabled={disabled}
+            rows={3}
+            onChange={(event) => onChange("riskNotesText", event.target.value)}
+          />
+        </label>
+      </div>
+
+      <div className="ai-actions">
+        <button type="button" onClick={onApplySellingPoints} disabled={disabled}>
+          应用建议卖点
+        </button>
+        <button type="button" onClick={onApplyStartPrice} disabled={disabled}>
+          应用建议起拍价
+        </button>
+        <button type="button" onClick={onApplyCapPrice} disabled={disabled}>
+          应用建议封顶价
+        </button>
+      </div>
+    </div>
+  );
+}
+
 async function fetchAuctions(status: AuctionStatus | "ALL"): Promise<AuctionListResponse> {
   const query = new URLSearchParams({ page: "1", pageSize: "50" });
 
@@ -869,6 +1190,14 @@ function toCreateAuctionPayload(
   form: CreateAuctionForm,
   itemId: string
 ): CreateAuctionPayload {
+  return {
+    roomId: readRequiredText(form.roomId, "直播间 ID"),
+    itemId,
+    ...toAuctionRulePayload(form)
+  };
+}
+
+function toAuctionRulePayload(form: CreateAuctionForm): AuctionRulePayload {
   const startPriceFen = parseYuanToFen(form.startPriceYuan, "起拍价");
   const incrementFen = parseYuanToFen(form.incrementYuan, "固定加价");
   const capPriceFen = parseYuanToFen(form.capPriceYuan, "封顶价");
@@ -882,8 +1211,6 @@ function toCreateAuctionPayload(
   }
 
   return {
-    roomId: readRequiredText(form.roomId, "直播间 ID"),
-    itemId,
     startPriceFen,
     incrementFen,
     durationSeconds: parsePositiveInteger(form.durationSeconds, "竞拍时长"),
@@ -894,6 +1221,62 @@ function toCreateAuctionPayload(
     ),
     extensionSeconds: parseNonNegativeInteger(form.extensionSeconds, "延时时长"),
     maxExtensionCount: parseOptionalNonNegativeInteger(form.maxExtensionCount, "最大延时次数")
+  };
+}
+
+function toAiInsightForm(response: AiAuctionInsightResponse): AiInsightForm {
+  return {
+    id: response.id,
+    source: response.source,
+    targetAudienceText: response.targetAudience.join("，"),
+    sellingPointTagsText: response.sellingPointTags.join("，"),
+    liveScript: response.liveScript,
+    atmosphereCopy: response.atmosphereCopy,
+    suggestedStartPriceYuan: formatYuanInput(response.suggestedStartPriceFen),
+    suggestedDealMinYuan: formatYuanInput(response.suggestedDealMinFen),
+    suggestedDealMaxYuan: formatYuanInput(response.suggestedDealMaxFen),
+    suggestedCapPriceYuan: formatYuanInput(response.suggestedCapPriceFen),
+    cautionPriceYuan: formatYuanInput(response.cautionPriceFen),
+    priceReasoning: response.priceReasoning,
+    riskNotesText: response.riskNotes.join("\n"),
+    confidence: response.confidence
+  };
+}
+
+function toAiInsightPayload(form: AiInsightForm): AiInsightPayload {
+  const suggestedStartPriceFen = parseYuanToFen(form.suggestedStartPriceYuan, "建议起拍价");
+  const suggestedDealMinFen = parseYuanToFen(form.suggestedDealMinYuan, "建议成交下限");
+  const suggestedDealMaxFen = parseYuanToFen(form.suggestedDealMaxYuan, "建议成交上限");
+  const suggestedCapPriceFen = parseYuanToFen(form.suggestedCapPriceYuan, "建议封顶价");
+  const cautionPriceFen = parseYuanToFen(form.cautionPriceYuan, "谨慎价");
+
+  if (suggestedDealMaxFen < suggestedDealMinFen) {
+    throw new Error("建议成交上限必须大于或等于下限");
+  }
+
+  if (suggestedCapPriceFen < suggestedDealMaxFen) {
+    throw new Error("建议封顶价必须大于或等于建议成交上限");
+  }
+
+  if (cautionPriceFen < suggestedDealMaxFen) {
+    throw new Error("谨慎价必须大于或等于建议成交上限");
+  }
+
+  return {
+    id: form.id,
+    source: form.source,
+    targetAudience: parseDelimitedText(form.targetAudienceText, "适合人群", 6, 60),
+    sellingPointTags: parseDelimitedText(form.sellingPointTagsText, "卖点标签", 8, 40),
+    suggestedStartPriceFen,
+    suggestedDealMinFen,
+    suggestedDealMaxFen,
+    suggestedCapPriceFen,
+    cautionPriceFen,
+    priceReasoning: readRequiredText(form.priceReasoning, "价格推断说明"),
+    liveScript: readRequiredText(form.liveScript, "直播讲解词"),
+    atmosphereCopy: readRequiredText(form.atmosphereCopy, "竞拍氛围话术"),
+    riskNotes: parseDelimitedText(form.riskNotesText, "风险提示", 6, 120),
+    confidence: form.confidence
   };
 }
 
@@ -922,10 +1305,7 @@ function readRequiredUrl(value: string, label: string): string {
 }
 
 function parseSellingPoints(value: string): string[] {
-  const points = value
-    .split(/[\n,，]/)
-    .map((point) => point.trim())
-    .filter(Boolean);
+  const points = splitDelimitedText(value);
 
   if (points.length > 10) {
     throw new Error("卖点标签最多 10 个");
@@ -937,6 +1317,37 @@ function parseSellingPoints(value: string): string[] {
   }
 
   return points;
+}
+
+function parseDelimitedText(
+  value: string,
+  label: string,
+  maxItems: number,
+  maxLength: number
+): string[] {
+  const items = splitDelimitedText(value);
+
+  if (items.length === 0) {
+    throw new Error(`${label}不能为空`);
+  }
+
+  if (items.length > maxItems) {
+    throw new Error(`${label}最多 ${maxItems} 项`);
+  }
+
+  const invalid = items.find((item) => item.length > maxLength);
+  if (invalid) {
+    throw new Error(`${label}「${invalid}」不能超过 ${maxLength} 字符`);
+  }
+
+  return items;
+}
+
+function splitDelimitedText(value: string): string[] {
+  return value
+    .split(/[\n,，]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function parseYuanToFen(value: string, label: string): number {
@@ -1003,6 +1414,13 @@ function formatFen(value: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2
   })}`;
+}
+
+function formatYuanInput(value: number): string {
+  const yuan = Math.trunc(value / 100);
+  const fen = value % 100;
+
+  return fen === 0 ? String(yuan) : `${yuan}.${fen.toString().padStart(2, "0")}`;
 }
 
 function formatRemaining(auction: AuctionListItem, now: number): string {

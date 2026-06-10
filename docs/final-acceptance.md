@@ -36,18 +36,20 @@
 3. 出价引擎使用 Redis Lua、Redis 分布式锁和 `clientBidId` 幂等，保证当前价单调、最高出价人唯一、重复点击不重复落库。
 4. 竞拍状态机集中处理启动、取消、到期成交、到期流拍和封顶价立即成交，成交订单通过 `Order(auctionId)` 唯一约束防重复。
 5. Socket.IO 按 `room:{roomId}`、`auction:{auctionId}`、`user:{userId}` 房间隔离事件，客户端重连后以 snapshot 恢复最新状态。
-6. 提供真实 HTTP 30/100 并发压测数据、服务级 e2e、单元测试、手工验收清单和生产 compose 演示入口。
+6. AI 竞拍参考助手支持后台生成 / 编辑适合人群、卖点话术和整数分参考价格区间，无 Key 时 deterministic mock/fallback，移动端展示脱敏参考卡片。
+7. 提供真实 HTTP 30/100 并发压测数据、服务级 e2e、单元测试、手工验收清单和生产 compose 演示入口。
 
 ## 5. 端到端使用流程
 
 1. 主播进入管理后台，在“商品上架”页面填写商品名称、图片、介绍和卖点，并配置起拍价、固定加价、封顶价、竞拍时长、防狙击窗口和延时时长。
-2. 后端通过 `POST /admin/auctions/with-item` 在同一事务内创建商品、规则和 `SCHEDULED` 竞拍，后台列表刷新后可启动。
-3. 主播点击启动，竞拍进入 `RUNNING`，服务端注册结束 timer，并通过 outbox 向直播间和竞拍房间广播 `AUCTION_STARTED`。
-4. 用户进入移动端直播间，页面拉取竞拍列表、详情和 snapshot，用 `serverTime` 校准倒计时，用 `serverSeq` 处理乱序事件。
-5. 用户提交出价后，服务端完成 Redis 原子校验、DB 持久化、事件落库和房间广播；领先用户看到“当前您已是最高价”，被超越用户看到“你已被超越”。
-6. 如果最后窗口内有效出价触发防狙击延时，服务端更新 `endTime` 并广播 `AUCTION_EXTENDED`；如果达到封顶价则立即成交。
-7. 竞拍到期或封顶后，状态机结算为成交或流拍；成交时只生成一个订单，并向中拍用户发送 `ORDER_CREATED`。
-8. 中拍用户在移动端结果弹窗查看订单并执行模拟支付，主播可在后台订单列表看到成交金额和订单状态。
+2. 主播点击“AI 生成竞拍参考”，后端根据规则先推断整数分参考价格区间，再用 mock/OpenAI/Ark 生成适合人群、卖点话术和理性出价提示；主播可编辑结果并应用建议卖点、起拍价或封顶价。
+3. 后端通过 `POST /admin/auctions/with-item` 在同一事务内创建商品、规则、`SCHEDULED` 竞拍并绑定 AI 参考，后台列表刷新后可启动。
+4. 主播点击启动，竞拍进入 `RUNNING`，服务端注册结束 timer，并通过 outbox 向直播间和竞拍房间广播 `AUCTION_STARTED`。
+5. 用户进入移动端直播间，页面拉取竞拍列表、详情、AI 参考和 snapshot，用 `serverTime` 校准倒计时，用 `serverSeq` 处理乱序事件。
+6. 用户提交出价后，服务端完成 Redis 原子校验、DB 持久化、事件落库和房间广播；领先用户看到“当前您已是最高价”，被超越用户看到“你已被超越”。
+7. 如果最后窗口内有效出价触发防狙击延时，服务端更新 `endTime` 并广播 `AUCTION_EXTENDED`；如果达到封顶价则立即成交。
+8. 竞拍到期或封顶后，状态机结算为成交或流拍；成交时只生成一个订单，并向中拍用户发送 `ORDER_CREATED`。
+9. 中拍用户在移动端结果弹窗查看订单并执行模拟支付，主播可在后台订单列表看到成交金额和订单状态。
 
 ## 6. 在线 Demo 链接
 
@@ -120,6 +122,7 @@ flowchart LR
   Server --> Outbox["AuctionEvent outbox"]
   Outbox --> Gateway
   Server --> Audit["AuditLog / consistency check"]
+  Server --> AI["AI reference helper"]
 ```
 
 关键边界：
@@ -134,7 +137,7 @@ flowchart LR
 项目主业务链路不依赖外部大模型。AI 相关使用分两类：
 
 - 开发协作：使用 Codex 进行需求拆解、代码审视、测试补强和文档整理；过程记录在 `docs/ai-codex-log.md`。
-- 产品功能：`POST /admin/ai/generate-selling-points` 仍是目标契约 / 加分项，当前不作为已实现主流程宣称；缺少真实 API Key 时应 fallback 到确定性 mock，且密钥只能来自环境变量。
+- 产品功能：已实现 `POST /admin/ai/auction-insights` 和 `GET /auctions/:auctionId/ai-insight`。AI 只生成适合人群、卖点话术、参考价格区间和理性出价提示；无 `AI_API_KEY` 时返回 deterministic mock/fallback，支持 OpenAI Responses 和 Ark/Doubao OpenAI-compatible Chat Completions，密钥只在后端环境变量读取。
 
 Agent 工作流：
 
@@ -179,5 +182,5 @@ flowchart TD
 - Playwright 浏览器全链路测试。
 - 生产 compose 在新机器上的实际 build/up 记录。
 - 自动修复型 Redis/DB 对账。
-- 已上线的 AI 卖点生成产品功能。
+- AI 自动出价、AI 参与状态机裁决、专业鉴定估价或真实市场价值承诺。
 - 对应的录屏、截图、测试报告，并发部分的测试。

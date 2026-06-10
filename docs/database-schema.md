@@ -169,3 +169,32 @@
 | `createdAt` | DateTime | 是 | now | idx `createdAt` | 创建时间 |
 
 日志不得记录完整密钥、完整授权头或敏感个人信息。
+
+## 11. AiAuctionInsight
+
+AI 竞拍参考助手持久化表。该表保存后台生成或编辑后的参考内容，允许先生成未绑定竞拍的草稿，再在 `POST /admin/auctions/with-item` 创建商品和竞拍时绑定 `itemId` / `auctionId`。AI 结果只用于参考展示，不参与出价、状态机或订单结算。
+
+| 字段 | 类型 | 必填 | 默认值 | 索引 / 约束 | 说明 |
+| --- | --- | --- | --- | --- | --- |
+| `id` | String | 是 | cuid | PK | AI 参考 ID |
+| `itemId` | String? | 否 | null | idx `itemId` | 关联商品，生成前可为空 |
+| `auctionId` | String? | 否 | null | idx `auctionId` | 关联竞拍，生成前可为空 |
+| `source` | String | 是 | `mock` |  | `mock`、`openai`、`ark`、`fallback` |
+| `targetAudience` | Json | 是 | 无 |  | 适合人群数组 |
+| `sellingPointTags` | Json | 是 | 无 |  | 卖点标签数组 |
+| `liveScript` | String | 是 | 无 |  | 直播讲解词 |
+| `atmosphereCopy` | String | 是 | 无 |  | 竞拍氛围话术 |
+| `suggestedStartPriceFen` | Int? | 否 | null |  | 建议起拍价，单位分 |
+| `suggestedDealMinFen` | Int? | 否 | null |  | 建议成交区间下限，单位分 |
+| `suggestedDealMaxFen` | Int? | 否 | null |  | 建议成交区间上限，单位分 |
+| `suggestedCapPriceFen` | Int? | 否 | null |  | 建议封顶价，单位分 |
+| `cautionPriceFen` | Int? | 否 | null |  | 谨慎价，单位分 |
+| `priceReasoning` | String | 是 | 无 |  | 价格推断说明 |
+| `riskNotes` | Json | 是 | 无 |  | 风险提示数组，必须包含价格仅供参考或同义提醒 |
+| `confidence` | String | 是 | `medium` |  | `low`、`medium`、`high` |
+| `inputSnapshot` | Json | 是 | 无 |  | 生成输入快照；不通过用户端接口返回 |
+| `createdById` | String? | 否 | null | idx `createdById` | 生成或绑定的管理员 |
+| `createdAt` | DateTime | 是 | now | idx `createdAt` | 创建时间 |
+| `updatedAt` | DateTime | 是 | now |  | 更新时间 |
+
+用户端 `GET /auctions/:auctionId/ai-insight` 只返回脱敏字段：`source`、`targetAudience`、参考成交区间、`cautionPriceFen`、`riskNotes`、`confidence`。不得返回成本价、内部市场参考价、完整 prompt、模型原始响应或 `inputSnapshot`。

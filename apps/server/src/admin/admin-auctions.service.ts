@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import {
   AuctionStatus as PrismaAuctionStatus,
   type AuctionItem,
@@ -14,6 +14,7 @@ import {
 } from "../auction/auction-rule.validation";
 import { AuctionSchedulerService } from "../auction/auction-scheduler.service";
 import { AuctionStateMachineService } from "../auction/auction-state-machine.service";
+import { AiAuctionInsightService } from "../ai/ai-auction-insight.service";
 import { notFound } from "../common/api-error";
 import {
   type PageMeta,
@@ -99,7 +100,10 @@ export class AdminAuctionsService {
     @Inject(AuctionStateMachineService)
     private readonly stateMachine: AuctionStateMachineService,
     @Inject(AuctionSchedulerService)
-    private readonly scheduler: AuctionSchedulerService
+    private readonly scheduler: AuctionSchedulerService,
+    @Optional()
+    @Inject(AiAuctionInsightService)
+    private readonly aiInsights?: AiAuctionInsightService
   ) {}
 
   async createAuction(payload: CreateAuctionPayload): Promise<AuctionDto> {
@@ -151,7 +155,7 @@ export class AdminAuctionsService {
         data: values.rule
       });
 
-      return tx.auctionSession.create({
+      const auction = await tx.auctionSession.create({
         data: {
           roomId: values.roomId,
           itemId: item.id,
@@ -167,6 +171,19 @@ export class AdminAuctionsService {
           rule: true
         }
       });
+
+      if (values.aiInsight !== undefined && this.aiInsights) {
+        await this.aiInsights.bindInsightToAuction(tx, values.aiInsight, {
+          itemId: item.id,
+          auctionId: auction.id,
+          roomId: values.roomId,
+          createdById,
+          item: values.item,
+          rule: values.rule
+        });
+      }
+
+      return auction;
     });
 
     return toAuctionDto(auction);

@@ -1,0 +1,8 @@
+stateDiagram-v2
+  [*] --> DRAFT
+  DRAFT --> SCHEDULED
+  SCHEDULED --> RUNNING
+  SCHEDULED --> CANCELLED
+  RUNNING --> ENDED_SOLD: 有最高出价人 / 封顶
+  RUNNING --> ENDED_UNSOLD: 到期无人出价
+  RUNNING --> CANCELLED

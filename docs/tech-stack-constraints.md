@@ -217,7 +217,7 @@ POST   /admin/auctions/:auctionId/start
 POST   /admin/auctions/:auctionId/cancel
 GET    /admin/orders
 GET    /admin/orders/:orderId
-POST   /admin/ai/generate-selling-points
+POST   /admin/ai/auction-insights
 ```
 
 ### 9.3 错误格式

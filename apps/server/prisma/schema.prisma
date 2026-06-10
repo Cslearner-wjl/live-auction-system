@@ -86,6 +86,7 @@ model User {
   wonOrders       Order[]          @relation("OrderBuyer")
   leadingAuctions AuctionSession[] @relation("AuctionHighestBidder")
   auditLogs       AuditLog[]       @relation("AuditActor")
+  aiAuctionInsights AiAuctionInsight[] @relation("AiAuctionInsightCreator")
 
   @@index([role])
   @@map("users")
@@ -120,6 +121,7 @@ model AuctionItem {
   createdBy     User             @relation("AuctionItemCreator", fields: [createdById], references: [id])
   auctions      AuctionSession[]
   orders        Order[]
+  aiInsights    AiAuctionInsight[]
 
   @@index([name])
   @@index([createdById])
@@ -169,6 +171,7 @@ model AuctionSession {
   order           Order?
   events          AuctionEvent[]
   auditLogs       AuditLog[]
+  aiInsights      AiAuctionInsight[]
 
   @@index([roomId])
   @@index([itemId])
@@ -279,4 +282,36 @@ model AuditLog {
   @@index([eventId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+model AiAuctionInsight {
+  id                     String          @id @default(cuid()) @db.VarChar(191)
+  itemId                 String?         @map("item_id") @db.VarChar(191)
+  auctionId              String?         @map("auction_id") @db.VarChar(191)
+  source                 String          @default("mock") @db.VarChar(20)
+  targetAudience         Json            @map("target_audience")
+  sellingPointTags       Json            @map("selling_point_tags")
+  liveScript             String          @map("live_script") @db.Text
+  atmosphereCopy         String          @map("atmosphere_copy") @db.Text
+  suggestedStartPriceFen Int?            @map("suggested_start_price_fen")
+  suggestedDealMinFen    Int?            @map("suggested_deal_min_fen")
+  suggestedDealMaxFen    Int?            @map("suggested_deal_max_fen")
+  suggestedCapPriceFen   Int?            @map("suggested_cap_price_fen")
+  cautionPriceFen        Int?            @map("caution_price_fen")
+  priceReasoning         String          @map("price_reasoning") @db.Text
+  riskNotes              Json            @map("risk_notes")
+  confidence             String          @default("medium") @db.VarChar(20)
+  inputSnapshot          Json            @map("input_snapshot")
+  createdById            String?         @map("created_by_id") @db.VarChar(191)
+  createdAt              DateTime        @default(now()) @map("created_at")
+  updatedAt              DateTime        @updatedAt @map("updated_at")
+  item                   AuctionItem?    @relation(fields: [itemId], references: [id])
+  auction                AuctionSession? @relation(fields: [auctionId], references: [id])
+  createdBy              User?           @relation("AiAuctionInsightCreator", fields: [createdById], references: [id])
+
+  @@index([itemId])
+  @@index([auctionId])
+  @@index([createdById])
+  @@index([createdAt])
+  @@map("ai_auction_insights")
 }

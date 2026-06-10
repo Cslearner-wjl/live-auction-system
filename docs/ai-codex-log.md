@@ -407,3 +407,41 @@
 | human-reviewed decisions | 只修改移动端展示层，不改 REST API、WebSocket 事件、竞拍状态机或支付逻辑；保留进行中竞拍的小卡片倒计时，已成交 / 已取消等终态只保留状态角标和查看结果入口 |
 | tests run | `pnpm --filter @live-auction/mobile typecheck`、`pnpm --filter @live-auction/mobile build`、Playwright 临时脚本在 390x844 视口验证竞拍小卡从 366x87 缩小到 300x68，三条评论均未与小卡相交且页面无 `Failed to fetch` |
 | known issues | 长商品名在小卡片中仍会单行省略，完整信息需打开半屏面板查看；本次未新增业务逻辑测试，因为没有修改竞拍规则或状态流转 |
+
+## 2026-06-09
+
+| 字段 | 内容 |
+| --- | --- |
+| task | 实现 AI 竞拍参考助手 |
+| prompt summary | 用户提供 `D:/Users/20742/Desktop/要求.md`，要求只完成 AI 参考助手阶段 1/2：无 Key deterministic mock，有 Key 调 OpenAI，后台可生成编辑，移动端展示脱敏参考，不做自动出价、专业鉴定或状态机决策 |
+| files changed | `.env.example`、`packages/shared/src/error-codes.ts`、`packages/shared/dist/*`、`apps/server/prisma/schema.prisma`、新增 Prisma migration、`apps/server/src/ai/*`、`apps/server/src/admin/*`、`apps/server/src/app.module.ts`、`apps/admin/src/App.tsx`、`apps/admin/src/styles.css`、`apps/mobile/src/App.tsx`、`apps/mobile/src/mobile-auction-service.ts`、`apps/mobile/src/styles.css`、`docs/api.md`、`docs/database-schema.md`、`docs/error-codes.md`、`docs/demo-script.md`、`docs/final-acceptance.md`、`docs/manual-test.md`、`docs/ai-codex-log.md`、本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | `AiModule`、价格推断服务、mock provider、OpenAI Responses API provider、输出 schema 校验、AI 生成/公开读取 API、AI insight 持久化和绑定逻辑、后台 AI 编辑区、移动端 AI 参考卡片、相关测试和文档 |
+| human-reviewed decisions | 不新增 OpenAI SDK，使用后端 `fetch` 调 Responses API 并用本地 schema 二次校验；价格推断不完全交给模型，先由后端规则计算整数分区间；AI 不进入 Redis Lua、`BidService`、状态机、WebSocket 事件或 snapshot；用户端不返回成本价、内部市场价、prompt、inputSnapshot 或模型原始响应 |
+| tests run | `pnpm --filter @live-auction/server prisma:generate`、`pnpm --filter @live-auction/shared build`、`pnpm --filter @live-auction/server typecheck`、`pnpm --filter @live-auction/server test`、`pnpm --filter @live-auction/admin typecheck`、`pnpm --filter @live-auction/mobile typecheck` |
+| known issues | 真实 `AI_PROVIDER=openai` 需要本地提供 `AI_API_KEY` 后手测 source=`openai`；当前移动端 AI 卡片是 REST 附加读取，不新增 AI WebSocket 事件；AI 参考不构成专业鉴定、真实估值或成交承诺 |
+
+## 2026-06-09 - AI provider Doubao/Ark compatibility and verification
+
+| field | content |
+| --- | --- |
+| date | 2026-06-09 |
+| task | 配置用户本地 Doubao / 火山方舟 Ark API 并补齐测试审查 |
+| prompt summary | 用户提供 Doubao-Seed-2.0-lite、Ark endpoint id 和本地 API Key，要求直接配置、Docker 已打开后完成测试并审查 AI 功能 bug |
+| files changed | `apps/server/src/ai/openai-ai-provider.ts`, `apps/server/src/ai/openai-ai-provider.test.ts`, `apps/server/src/ai/ai-auction-insight.service.ts`, `apps/server/src/ai/ai-auction-insight.service.test.ts`, `apps/server/src/ai/ai-output.schema.ts`, `apps/server/src/ai/dto/ai-auction-insight.response.ts`, `apps/admin/src/App.tsx`, `apps/admin/src/styles.css`, `apps/mobile/src/mobile-auction-service.ts`, `.env.example`, `docs/api.md`, `docs/architecture.md`, `docs/manual-test.md`, `docs/demo-script.md`, `docs/final-acceptance.md`, `docs/tech-stack-constraints.md` |
+| AI-generated parts | Ark provider mode、OpenAI-compatible Chat Completions 请求体、base URL 兼容读取、source=`ark` 类型和 UI 展示、provider 单元测试 |
+| human-reviewed decisions | 真实密钥只写本地 ignored `.env`，不写源码、文档或示例；Ark 默认使用 `AI_MODEL` endpoint id 和 `chat_completions`，且 Doubao-Seed-2.0-lite 不支持 `response_format=json_object`，因此本地设为 `AI_CHAT_RESPONSE_FORMAT=none` 并由后端 schema 校验兜底；完整 AI 竞拍提示可能超过 8 秒，本地 Doubao 配置使用 `AI_TIMEOUT_MS=30000`；模型价格字段不作为权威值，解析后强制用后端 priceRange 覆盖；OpenAI 官方仍默认 Responses API；失败仍 fallback 到 mock，不影响竞拍主流程 |
+| tests run | `pnpm --filter @live-auction/server typecheck`; `pnpm --filter @live-auction/server test`; 真实 Ark provider 调用返回 source=`ark`; 临时 Nest 服务 `POST /admin/ai/auction-insights` 返回 source=`ark`; `pnpm typecheck`; `pnpm test`; `pnpm lint`; `pnpm build`; `pnpm test:e2e`; `git diff --check`; 密钥泄漏扫描无真实 key 命中 |
+| known issues | 真实模型输出仍以本地 schema 二次校验为准；模型异常会 fallback，不作为竞拍状态和价格决策依据 |
+
+## 2026-06-09 - Temporary public demo deployment
+
+| field | content |
+| --- | --- |
+| date | 2026-06-09 |
+| task | 部署临时公网在线 Demo 链接 |
+| prompt summary | 用户要求只需要几天可访问的在线 Demo 链接，并要求直接帮助部署上去 |
+| files changed | `apps/server/docker-entrypoint.sh`, `docs/ai-codex-log.md`, 本地忽略文件 `docs/learning/engineering-experience.md` |
+| AI-generated parts | 使用 Cloudflare Quick Tunnel 暴露 server/admin/mobile 三个本地生产端口；修复生产容器启动脚本，使 Prisma CLI 在 `apps/server` 目录读取 `prisma.config.ts` 后执行 migrate deploy 和 seed |
+| human-reviewed decisions | 不引入云厂商账号和固定域名，不提交任何密钥；前端镜像构建时注入临时 API 公网地址；保留 MySQL/Redis Docker 数据卷，不执行清库；临时 tunnel 只用于几天 Demo，不作为生产部署 |
+| tests run | `docker --version`; `docker compose version`; `cloudflared --version`; `docker compose -f docker-compose.prod.yml up -d --build`; `docker compose -f docker-compose.prod.yml ps`; 本地 `GET /health`; 公网 API `GET /health`; 公网 admin/mobile `GET /health`; 公网 admin/mobile HTML root 检查；公网 CORS origin 检查；公网 REST `GET /rooms/room_1/auctions`; 公网 Socket.IO websocket 连接、加入 room/auction、请求 snapshot；Playwright 公网页面探针验证 admin/mobile 可渲染且页面未显示 `Failed to fetch` |
+| known issues | Cloudflare account-less quick tunnel 没有 uptime guarantee，电脑、Docker 或 `cloudflared` 进程关闭后链接会失效；三端是三个临时域名；当前链接适合课程/评审 Demo，不适合真实生产交易 |

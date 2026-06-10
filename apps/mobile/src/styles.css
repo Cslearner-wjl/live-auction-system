@@ -686,6 +686,65 @@ button {
   opacity: 0.72;
 }
 
+.ai-reference-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #e7edf5;
+  border-radius: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.ai-reference-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ai-reference-card header strong {
+  color: #202533;
+  font-size: 14px;
+}
+
+.ai-reference-card header span {
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.ai-targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-targets span {
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: #eef8f1;
+  color: #087a55;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ai-reference-metrics {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  gap: 8px;
+}
+
+.ai-reference-card p {
+  margin: 0;
+  color: #7b8494;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .bid-stepper {
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr) 52px;
@@ -1009,6 +1068,10 @@ button {
 
   .rule-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ai-reference-metrics {
+    grid-template-columns: 1fr;
   }
 }
 

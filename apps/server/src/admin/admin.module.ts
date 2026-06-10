@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { AiModule } from "../ai/ai.module";
 import { AuctionModule } from "../auction/auction.module";
 import { PrismaModule } from "../prisma/prisma.module";
 import { AdminAuctionsController } from "./admin-auctions.controller";
@@ -11,7 +12,7 @@ import { AdminUploadsController } from "./admin-uploads.controller";
 import { AdminUploadsService } from "./admin-uploads.service";
 
 @Module({
-  imports: [PrismaModule, AuctionModule],
+  imports: [PrismaModule, AuctionModule, AiModule],
   controllers: [
     AdminItemsController,
     AdminAuctionsController,

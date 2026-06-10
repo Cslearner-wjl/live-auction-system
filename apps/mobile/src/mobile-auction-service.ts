@@ -18,6 +18,7 @@ export interface LiveRoomViewModel {
   streamPosterUrl: string;
   auction: MobileAuctionDetail;
   snapshot: AuctionSnapshot;
+  aiInsight: PublicAiAuctionInsightDto | null;
   comments: LiveComment[];
 }
 
@@ -96,6 +97,16 @@ export interface PublicAuctionDto {
   endTime: string | null;
   serverTime: string;
   serverSeq: number;
+}
+
+export interface PublicAiAuctionInsightDto {
+  source: "mock" | "openai" | "ark" | "fallback";
+  targetAudience: string[];
+  suggestedDealMinFen: number;
+  suggestedDealMaxFen: number;
+  cautionPriceFen: number;
+  riskNotes: string[];
+  confidence: "low" | "medium" | "high";
 }
 
 export interface PlaceBidResultDto {
@@ -233,12 +244,13 @@ export async function loadLiveRoom(
     );
   }
 
-  const [auction, snapshot] = await Promise.all([
+  const [auction, snapshot, aiInsight] = await Promise.all([
     getAuctionDetail(config, selected.auctionId),
-    getAuctionSnapshot(config, selected.auctionId)
+    getAuctionSnapshot(config, selected.auctionId),
+    getAuctionAiInsight(config, selected.auctionId).catch(() => null)
   ]);
 
-  return toLiveRoomViewModel(auction, snapshot);
+  return toLiveRoomViewModel(auction, snapshot, aiInsight);
 }
 
 export async function listRoomAuctions(
@@ -259,6 +271,13 @@ export async function getAuctionSnapshot(
   auctionId: string
 ): Promise<AuctionSnapshot> {
   return requestJson(config, `/auctions/${encodeURIComponent(auctionId)}/snapshot`);
+}
+
+export async function getAuctionAiInsight(
+  config: MobileClientConfig,
+  auctionId: string
+): Promise<PublicAiAuctionInsightDto> {
+  return requestJson(config, `/auctions/${encodeURIComponent(auctionId)}/ai-insight`);
 }
 
 export async function placeBidByRest(
@@ -370,7 +389,8 @@ export function getDisplayErrorMessage(error: unknown): string {
 
 export function toLiveRoomViewModel(
   auction: PublicAuctionDto,
-  snapshot: AuctionSnapshot
+  snapshot: AuctionSnapshot,
+  aiInsight: PublicAiAuctionInsightDto | null = null
 ): LiveRoomViewModel {
   return {
     roomId: auction.roomId,
@@ -398,6 +418,7 @@ export function toLiveRoomViewModel(
       maxExtensionCount: auction.maxExtensionCount
     },
     snapshot,
+    aiInsight,
     comments: createInitialComments(auction, snapshot)
   };
 }

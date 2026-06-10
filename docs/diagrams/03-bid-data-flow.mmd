@@ -1,0 +1,9 @@
+flowchart LR
+  U["移动端出价"] --> D["DTO + demo 身份校验"]
+  D --> Q["本进程 auctionId 队列"]
+  Q --> L["Redis 分布式锁<br/>auction:{id}:bid_lock"]
+  L --> Lua["Redis Lua 原子校验<br/>状态/价格/加价/防狙击/封顶"]
+  Lua --> Persist["写 Bid + 更新 AuctionSession"]
+  Persist --> O["写 AuctionEvent(outbox, PENDING)"]
+  O --> P["发布器 claim/lease"]
+  P --> WS["Socket.IO 定向广播<br/>BID_ACCEPTED / LEADING / OUTBID / AUCTION_EXTENDED"]
